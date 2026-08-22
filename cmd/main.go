@@ -35,6 +35,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+
 	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
 	"github.com/arbit-tech/volume-branch-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
@@ -49,6 +51,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(volumesv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(snapv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

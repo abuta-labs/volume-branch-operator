@@ -18,16 +18,28 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
+	"github.com/arbit-tech/volume-branch-operator/internal/branch"
 )
 
-// BranchSourceReconciler reconciles a BranchSource object
+// SourceFinalizer gates BranchSource deletion on the cascade: every Branch of
+// the source is deleted first (each tears down its own clone objects via its
+// own finalizer), then any engine-created cluster-scoped
+// VolumeSnapshotContent that outlived its Branch is swept.
+const SourceFinalizer = "volumes.arbit-tech.com/source-teardown"
+
+// BranchSourceReconciler reconciles a BranchSource object.
 type BranchSourceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -36,21 +48,137 @@ type BranchSourceReconciler struct {
 // +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchsources,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchsources/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchsources/finalizers,verbs=update
+// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branches,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotcontents,verbs=get;list;watch;create;delete
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the BranchSource object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.1/pkg/reconcile
+// Reconcile validates the source against the cluster's storage configuration
+// and moves status.phase to Ready or Invalid accordingly.
 func (r *BranchSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	var src volumesv1alpha1.BranchSource
+	if err := r.Get(ctx, req.NamespacedName, &src); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
 
-	// TODO(user): your logic here
+	if !src.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, &src)
+	}
+	if controllerutil.AddFinalizer(&src, SourceFinalizer) {
+		if err := r.Update(ctx, &src); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
+	phase, msg := r.validate(ctx, &src)
+	if src.Status.Phase != phase || src.Status.Message != msg {
+		src.Status.Phase = phase
+		src.Status.Message = msg
+		if err := r.Status().Update(ctx, &src); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	if phase != volumesv1alpha1.BranchSourceReady {
+		// The missing class may be created later; poll rather than wedge.
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	return ctrl.Result{}, nil
+}
+
+// validate checks that the referenced classes exist and are mutually
+// consistent: both must belong to the CSI driver that owns the snapshot
+// handle, or clone PVCs would be provisioned by a driver that has never
+// heard of the snapshot.
+func (r *BranchSourceReconciler) validate(ctx context.Context, src *volumesv1alpha1.BranchSource) (volumesv1alpha1.BranchSourcePhase, string) {
+	var sc storagev1.StorageClass
+	if err := r.Get(ctx, client.ObjectKey{Name: src.Spec.CloneStorageClassName}, &sc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return volumesv1alpha1.BranchSourceInvalid,
+				fmt.Sprintf("StorageClass %q not found", src.Spec.CloneStorageClassName)
+		}
+		return volumesv1alpha1.BranchSourcePending, err.Error()
+	}
+	if sc.Provisioner != src.Spec.CSIDriver {
+		return volumesv1alpha1.BranchSourceInvalid,
+			fmt.Sprintf("StorageClass %q is provisioned by %q, not spec.csiDriver %q",
+				sc.Name, sc.Provisioner, src.Spec.CSIDriver)
+	}
+	var vsc snapv1.VolumeSnapshotClass
+	if err := r.Get(ctx, client.ObjectKey{Name: src.Spec.VolumeSnapshotClassName}, &vsc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return volumesv1alpha1.BranchSourceInvalid,
+				fmt.Sprintf("VolumeSnapshotClass %q not found", src.Spec.VolumeSnapshotClassName)
+		}
+		return volumesv1alpha1.BranchSourcePending, err.Error()
+	}
+	if vsc.Driver != src.Spec.CSIDriver {
+		return volumesv1alpha1.BranchSourceInvalid,
+			fmt.Sprintf("VolumeSnapshotClass %q belongs to driver %q, not spec.csiDriver %q",
+				vsc.Name, vsc.Driver, src.Spec.CSIDriver)
+	}
+	return volumesv1alpha1.BranchSourceReady, ""
+}
+
+// reconcileDelete cascades the source delete to its Branches, then sweeps any
+// engine-labeled VolumeSnapshotContent left behind (cluster-scoped objects
+// cannot carry an owner reference to a namespaced Branch, so garbage
+// collection never reaps them). All per-branch VSCs are Retain-policy, so the
+// sweep detaches Kubernetes objects only — the physical snapshot is
+// deliberately untouched here; physical reclaim is a separate, source-level
+// operation out of this controller's scope.
+func (r *BranchSourceReconciler) reconcileDelete(ctx context.Context, src *volumesv1alpha1.BranchSource) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(src, SourceFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	// Cascade: delete every Branch referencing this source. Filtered in code
+	// rather than by field index — a source has tens of branches, not
+	// thousands, and reconcilers here are also invoked directly in tests
+	// where no index-backed cache exists.
+	var branches volumesv1alpha1.BranchList
+	if err := r.List(ctx, &branches); err != nil {
+		return ctrl.Result{}, err
+	}
+	remaining := 0
+	for i := range branches.Items {
+		b := &branches.Items[i]
+		if b.Spec.Source != src.Name {
+			continue
+		}
+		remaining++
+		if b.DeletionTimestamp.IsZero() {
+			if err := r.Delete(ctx, b); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+	if remaining > 0 {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
+	var vscs snapv1.VolumeSnapshotContentList
+	if err := r.List(ctx, &vscs, client.MatchingLabels{branch.SourceLabel: src.Name}); err != nil {
+		return ctrl.Result{}, err
+	}
+	pending := 0
+	for i := range vscs.Items {
+		v := &vscs.Items[i]
+		if !v.DeletionTimestamp.IsZero() {
+			continue
+		}
+		pending++
+		if err := r.Delete(ctx, v); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+	}
+	if pending > 0 {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
+	controllerutil.RemoveFinalizer(src, SourceFinalizer)
+	if err := r.Update(ctx, src); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
