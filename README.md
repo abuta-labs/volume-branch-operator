@@ -68,7 +68,7 @@ spec:
 
 Complete walk-throughs: [`config/samples/zfs-localpv/`](config/samples/zfs-localpv/)
 (proven) and [`config/samples/fsx-openzfs/`](config/samples/fsx-openzfs/)
-(sketch, e2e pending).
+(proven — FSx gate, 2026-08-22).
 
 ## Quickstart (kind + ZFS-LocalPV)
 
