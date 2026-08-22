@@ -239,6 +239,81 @@ spec:
 		}, 2*time.Minute, 5*time.Second).Should(BeEmpty(), "TTL branch PVC leaked")
 	})
 
+	It("warms a pool and claims from it by PV rebind", func() {
+		kubectlApply(`
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: BranchPool
+metadata:
+  name: e2e-pool
+spec:
+  source: e2e-source
+  targetWarm: 1
+`)
+		Eventually(func() string {
+			out, _ := kubectl("get", "branchpool", "e2e-pool", "-o", "jsonpath={.status.warm}")
+			return out
+		}, 4*time.Minute, 5*time.Second).Should(Equal("1"), "pool never warmed")
+
+		// The warm clone's PV is the proof object: a pool claim must hand the
+		// consumer THIS volume (rebind), not provision a new one.
+		warmPV := strings.TrimSpace(mustKubectl("-n", "branch-pool", "get", "pvc",
+			"-l", "volumes.arbit-tech.com/pool-state=warm",
+			"-o", "jsonpath={.items[0].spec.volumeName}"))
+		Expect(warmPV).NotTo(BeEmpty())
+
+		kubectlApply(fmt.Sprintf(`
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: Branch
+metadata:
+  name: br-pool
+  namespace: %s
+spec:
+  source: e2e-source
+  pvcName: pool-clone-pvc
+`, ns))
+		start := time.Now()
+		Eventually(func() string { return branchPhase("br-pool") },
+			2*time.Minute, 2*time.Second).Should(Equal("Ready"))
+		claimTime := time.Since(start)
+		GinkgoWriter.Printf("pool claim to Ready: %s\n", claimTime)
+
+		Expect(mustKubectl("-n", ns, "get", "branch", "br-pool",
+			"-o", "jsonpath={.status.provisioning}")).To(Equal("pool"))
+		gotPV := strings.TrimSpace(mustKubectl("-n", ns, "get", "pvc", "pool-clone-pvc",
+			"-o", "jsonpath={.spec.volumeName}"))
+		Expect(gotPV).To(Equal(warmPV), "claim must rebind the pre-warmed PV, not provision")
+
+		logs := runPod("pool-reader", "pool-clone-pvc", "cat /data/seed.txt")
+		Expect(strings.TrimSpace(logs)).To(Equal(seedData))
+	})
+
+	It("replenishes the pool after the claim", func() {
+		Eventually(func() string {
+			out, _ := kubectl("get", "branchpool", "e2e-pool", "-o", "jsonpath={.status.warm}")
+			return out
+		}, 4*time.Minute, 5*time.Second).Should(Equal("1"), "pool never replenished")
+		Expect(mustKubectl("get", "branchpool", "e2e-pool",
+			"-o", "jsonpath={.status.claimedTotal}")).To(Equal("1"))
+	})
+
+	It("tears down the pool-claimed branch including its PV", func() {
+		claimedPV := strings.TrimSpace(mustKubectl("-n", ns, "get", "pvc", "pool-clone-pvc",
+			"-o", "jsonpath={.spec.volumeName}"))
+		mustKubectl("-n", ns, "delete", "branch", "br-pool", "--wait=true", "--timeout=180s")
+		Eventually(func() string {
+			out, _ := kubectl("get", "pv", claimedPV, "--ignore-not-found", "-o", "name")
+			return strings.TrimSpace(out)
+		}, 2*time.Minute, 5*time.Second).Should(BeEmpty(), "claimed PV leaked after branch teardown")
+	})
+
+	It("tears down the pool's warm set on pool delete", func() {
+		mustKubectl("delete", "branchpool", "e2e-pool", "--wait=true", "--timeout=180s")
+		Eventually(func() string {
+			out, _ := kubectl("-n", "branch-pool", "get", "pvc", "-o", "name")
+			return strings.TrimSpace(out)
+		}, 2*time.Minute, 5*time.Second).Should(BeEmpty(), "warm clones leaked after pool delete")
+	})
+
 	It("tears everything down without leaks", func() {
 		mustKubectl("-n", ns, "delete", "branch", "br1", "--wait=true", "--timeout=180s")
 		Expect(mustKubectl("-n", ns, "get", "pvc", "-o", "name")).NotTo(ContainSubstring(branchPVC))

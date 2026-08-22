@@ -85,6 +85,14 @@ spec:
           status:
             description: BranchStatus defines the observed state of Branch.
             properties:
+              claimedVolume:
+                description: |-
+                  claimedVolume is the PersistentVolume claimed from a pool for this
+                  Branch. Persisted immediately after the atomic claim and BEFORE the
+                  warm clone's objects are consumed, so the rebind can always be resumed
+                  or reclaimed — the warm PVC (the only other marker of the claim) is
+                  destroyed mid-rebind.
+                type: string
               clonedBytes:
                 description: clonedBytes is the clone's logical size, when known.
                 format: int64
