@@ -68,18 +68,8 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 KIND_CLUSTER ?= volume-branch-operator-test-e2e
 
 .PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
-	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
-		exit 1; \
-	}
-	@case "$$($(KIND) get clusters)" in \
-		*"$(KIND_CLUSTER)"*) \
-			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
-		*) \
-			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
-	esac
+setup-test-e2e: ## Stand up the e2e environment (kind + ZFS-LocalPV + snapshotter)
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) hack/e2e-up.sh
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
@@ -87,8 +77,8 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+cleanup-test-e2e: ## Tear down the e2e environment
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) hack/e2e-down.sh
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

@@ -1,6 +1,6 @@
 module github.com/arbit-tech/volume-branch-operator
 
-go 1.26.0
+go 1.25.0
 
 require (
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.4.0
