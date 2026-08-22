@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+- volumes_v1alpha1_branchsource.yaml
+- volumes_v1alpha1_branchpool.yaml
+- volumes_v1alpha1_branch.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

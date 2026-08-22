@@ -1,0 +1,126 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: branches.volumes.arbit-tech.com
+spec:
+  group: volumes.arbit-tech.com
+  names:
+    kind: Branch
+    listKind: BranchList
+    plural: branches
+    singular: branch
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.source
+      name: Source
+      type: string
+    - jsonPath: .spec.pvcName
+      name: PVC
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.provisioning
+      name: Via
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Branch is one claimed copy-on-write clone of a BranchSource.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              BranchSpec defines one claimed clone of a BranchSource, terminating at a
+              Bound PVC in the Branch's own namespace. The consumer names the PVC
+              (preserves ClaimRef pre-bind; the engine never picks names).
+            properties:
+              pvcName:
+                description: |-
+                  pvcName is the name of the PVC the engine must produce in this
+                  Branch's namespace.
+                minLength: 1
+                type: string
+              resetToken:
+                description: |-
+                  resetToken, when changed, discards the current clone and re-branches
+                  from the same source. Opaque to the engine.
+                type: string
+              source:
+                description: source is the name of the BranchSource to branch from.
+                minLength: 1
+                type: string
+              ttl:
+                description: |-
+                  ttl, when set, deletes the Branch (and its PVC) this long after it
+                  becomes Ready. Consumers with their own reaping policy omit it.
+                type: string
+            required:
+            - pvcName
+            - source
+            type: object
+          status:
+            description: BranchStatus defines the observed state of Branch.
+            properties:
+              clonedBytes:
+                description: clonedBytes is the clone's logical size, when known.
+                format: int64
+                type: integer
+              expiresAt:
+                description: expiresAt is when spec.ttl will reap this Branch (set
+                  once Ready).
+                format: date-time
+                type: string
+              message:
+                description: message carries a human-readable reason for Failed.
+                type: string
+              observedResetToken:
+                description: observedResetToken is the last resetToken acted upon.
+                type: string
+              phase:
+                description: |-
+                  phase ends at Ready when the named PVC is Bound. What runs on the
+                  volume afterwards is the consumer's business.
+                enum:
+                - Pending
+                - Cloning
+                - Ready
+                - Failed
+                type: string
+              provisioning:
+                description: |-
+                  provisioning records the claim path taken (pool fast path vs
+                  on-demand clone).
+                enum:
+                - pool
+                - ondemand
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
