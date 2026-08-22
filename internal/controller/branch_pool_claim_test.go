@@ -62,9 +62,9 @@ func stageWarmPool(ctx context.Context, srcName, sc string) (string, string, str
 	return bp.Name, warms[0].Name, pvName
 }
 
-func newBranch(ns, srcName string) *volumesv1alpha1.Branch {
+func newBranch(srcName string) *volumesv1alpha1.Branch {
 	return &volumesv1alpha1.Branch{
-		ObjectMeta: metav1.ObjectMeta{Name: uniqueName("br"), Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: uniqueName("br"), Namespace: "default"},
 		Spec:       volumesv1alpha1.BranchSpec{Source: srcName, PVCName: uniqueName("clone-pvc")},
 	}
 }
@@ -77,7 +77,7 @@ var _ = Describe("Branch pool-claim fast path", func() {
 		srcName, sc := readySourceWithSC(ctx)
 		poolName, warmName, pvName := stageWarmPool(ctx, srcName, sc)
 
-		b := newBranch(ns, srcName)
+		b := newBranch(srcName)
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		key := types.NamespacedName{Name: b.Name, Namespace: ns}
 		reconcileBranch(ctx, key, 2)
@@ -127,7 +127,7 @@ var _ = Describe("Branch pool-claim fast path", func() {
 	It("replenishes the pool after a claim", func() {
 		srcName, sc := readySourceWithSC(ctx)
 		poolName, _, _ := stageWarmPool(ctx, srcName, sc)
-		b := newBranch(ns, srcName)
+		b := newBranch(srcName)
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		reconcileBranch(ctx, types.NamespacedName{Name: b.Name, Namespace: ns}, 2)
 
@@ -139,8 +139,8 @@ var _ = Describe("Branch pool-claim fast path", func() {
 		srcName, sc := readySourceWithSC(ctx)
 		_, _, pvName := stageWarmPool(ctx, srcName, sc)
 
-		a := newBranch(ns, srcName)
-		b := newBranch(ns, srcName)
+		a := newBranch(srcName)
+		b := newBranch(srcName)
 		Expect(k8sClient.Create(ctx, a)).To(Succeed())
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		reconcileBranch(ctx, types.NamespacedName{Name: a.Name, Namespace: ns}, 2)
@@ -165,7 +165,7 @@ var _ = Describe("Branch pool-claim fast path", func() {
 		srcName, sc := readySourceWithSC(ctx)
 		_, _, pvName := stageWarmPool(ctx, srcName, sc)
 
-		b := newBranch(ns, srcName)
+		b := newBranch(srcName)
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		key := types.NamespacedName{Name: b.Name, Namespace: ns}
 		reconcileBranch(ctx, key, 2)
@@ -190,7 +190,7 @@ var _ = Describe("Branch pool-claim fast path", func() {
 	It("tears down a pool-claimed branch: consumer PVC and PV both go", func() {
 		srcName, sc := readySourceWithSC(ctx)
 		_, _, pvName := stageWarmPool(ctx, srcName, sc)
-		b := newBranch(ns, srcName)
+		b := newBranch(srcName)
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		key := types.NamespacedName{Name: b.Name, Namespace: ns}
 		reconcileBranch(ctx, key, 2)
@@ -222,7 +222,7 @@ var _ = Describe("Branch pool-claim fast path", func() {
 	It("resets a pool-claimed branch by re-cloning (pool empty -> on-demand)", func() {
 		srcName, sc := readySourceWithSC(ctx)
 		stageWarmPool(ctx, srcName, sc)
-		b := newBranch(ns, srcName)
+		b := newBranch(srcName)
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		key := types.NamespacedName{Name: b.Name, Namespace: ns}
 		reconcileBranch(ctx, key, 2)
@@ -253,7 +253,7 @@ var _ = Describe("Branch pool-claim fast path", func() {
 
 		// A Branch that flipped the label but died before anything else
 		// persisted: finalizer present, provisioning never recorded.
-		b := newBranch(ns, srcName)
+		b := newBranch(srcName)
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		controllerutil.AddFinalizer(b, BranchFinalizer)
 		Expect(k8sClient.Update(ctx, b)).To(Succeed())
