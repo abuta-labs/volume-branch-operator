@@ -57,9 +57,9 @@ func reconcileBranch(ctx context.Context, key types.NamespacedName, times int) {
 
 // bindPVC simulates the CSI provisioner: flips the PVC's status to Bound.
 // envtest runs no provisioner, so the bind must be faked to reach Ready.
-func bindPVC(ctx context.Context, name, ns string) {
+func bindPVC(ctx context.Context, name string) {
 	var pvc corev1.PersistentVolumeClaim
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, &pvc)).To(Succeed())
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &pvc)).To(Succeed())
 	pvc.Status.Phase = corev1.ClaimBound
 	Expect(k8sClient.Status().Update(ctx, &pvc)).To(Succeed())
 }
@@ -112,7 +112,7 @@ var _ = Describe("Branch Controller", func() {
 		Expect(pvc.Spec.DataSource.Name).To(Equal(branch.VSName(&got)))
 		Expect(pvc.OwnerReferences).To(HaveLen(1))
 
-		bindPVC(ctx, b.Spec.PVCName, ns)
+		bindPVC(ctx, b.Spec.PVCName)
 		reconcileBranch(ctx, key, 1)
 		Expect(k8sClient.Get(ctx, key, &got)).To(Succeed())
 		Expect(got.Status.Phase).To(Equal(volumesv1alpha1.BranchReady))
@@ -147,7 +147,7 @@ var _ = Describe("Branch Controller", func() {
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		key := types.NamespacedName{Name: b.Name, Namespace: ns}
 		reconcileBranch(ctx, key, 2)
-		bindPVC(ctx, b.Spec.PVCName, ns)
+		bindPVC(ctx, b.Spec.PVCName)
 		reconcileBranch(ctx, key, 1)
 
 		var got volumesv1alpha1.Branch
@@ -183,7 +183,7 @@ var _ = Describe("Branch Controller", func() {
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		key := types.NamespacedName{Name: b.Name, Namespace: ns}
 		reconcileBranch(ctx, key, 2)
-		bindPVC(ctx, b.Spec.PVCName, ns)
+		bindPVC(ctx, b.Spec.PVCName)
 		reconcileBranch(ctx, key, 1)
 
 		var got volumesv1alpha1.Branch
@@ -223,7 +223,7 @@ var _ = Describe("Branch Controller", func() {
 		Expect(k8sClient.Create(ctx, b)).To(Succeed())
 		key := types.NamespacedName{Name: b.Name, Namespace: ns}
 		reconcileBranch(ctx, key, 2)
-		bindPVC(ctx, b.Spec.PVCName, ns)
+		bindPVC(ctx, b.Spec.PVCName)
 		reconcileBranch(ctx, key, 1)
 
 		var got volumesv1alpha1.Branch
