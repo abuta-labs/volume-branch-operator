@@ -21,6 +21,7 @@ package e2e
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"testing"
 
@@ -42,6 +43,18 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	// External mode (E2E_SKIP_DEPLOY=1): the operator is already installed on
+	// the target cluster (e.g. from a release install.yaml) and KUBECONFIG
+	// points at it — no kind, no image build, no deploy. Used by the FSx gate.
+	if os.Getenv("E2E_SKIP_DEPLOY") != "" {
+		By("external cluster: waiting for the deployed operator to be ready")
+		cmd := exec.Command("kubectl", "-n", "volume-branch-operator-system", "rollout",
+			"status", "deploy/volume-branch-operator-controller-manager", "--timeout=180s")
+		_, err := utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "operator not ready on the external cluster")
+		return
+	}
+
 	By("building the manager image")
 	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage))
 	_, err := utils.Run(cmd)

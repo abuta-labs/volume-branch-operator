@@ -243,3 +243,7 @@ endef
 define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
+
+.PHONY: test-e2e-external
+test-e2e-external: manifests generate fmt vet ## Run the e2e specs against an existing cluster (KUBECONFIG + E2E_* env; operator already deployed). No kind, no teardown.
+	E2E_SKIP_DEPLOY=1 go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 90m

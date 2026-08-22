@@ -1,4 +1,4 @@
-# Walk-through: Amazon FSx for OpenZFS — profile defined, e2e pending
+# Walk-through: Amazon FSx for OpenZFS — proven (gate passed 2026-08-22)
 
 The engine ships a built-in profile for `fsx.openzfs.csi.aws.com`
 (snapshot-pins-volume teardown ordering, sentinel sizing, low warming

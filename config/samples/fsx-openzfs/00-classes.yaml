@@ -1,4 +1,4 @@
-# StorageClass for clone PVCs on FSx for OpenZFS (SKETCH — e2e pending).
+# StorageClass for clone PVCs on FSx for OpenZFS (verified by the FSx gate, 2026-08-22).
 # Parameter names follow the aws-fsx-openzfs-csi-driver's dynamic volume
 # provisioning; snapshot-sourced PVCs become OpenZFS child volumes.
 apiVersion: storage.k8s.io/v1
