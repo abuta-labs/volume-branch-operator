@@ -1,4 +1,4 @@
-# BranchSource on FSx (SKETCH — e2e pending). The built-in profile already
+# BranchSource on FSx (verified by the FSx gate, 2026-08-22). The built-in profile already
 # sets sentinel sizing, snapshot-pins-volume ordering, and maxWarming 2.
 apiVersion: volumes.arbit-tech.com/v1alpha1
 kind: BranchSource

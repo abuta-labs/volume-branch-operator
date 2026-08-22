@@ -34,7 +34,7 @@ notice.**
 | Driver | Status |
 |---|---|
 | OpenEBS ZFS-LocalPV (`zfs.csi.openebs.io`) | **Proven** — the full e2e suite runs against it in CI |
-| Amazon FSx for OpenZFS (`fsx.openzfs.csi.aws.com`) | Profile defined, **e2e pending** — no verified run yet |
+| Amazon FSx for OpenZFS (`fsx.openzfs.csi.aws.com`) | **Proven** — full lifecycle e2e passed 2026-08-22 on EKS + FSx (sentinel sizing, warming cap, pool claim 11.8s vs ~100s on-demand); see [docs/fsx-gate.md](docs/fsx-gate.md) |
 | Other snapshot-capable drivers | Conservative default profile; untested |
 
 ## How it works
