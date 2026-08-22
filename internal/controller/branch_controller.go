@@ -31,6 +31,7 @@ import (
 
 	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
 	"github.com/arbit-tech/volume-branch-operator/internal/branch"
+	"github.com/arbit-tech/volume-branch-operator/internal/pool"
 )
 
 // BranchFinalizer gates Branch deletion on clone teardown: PVC, then
@@ -51,9 +52,9 @@ type BranchReconciler struct {
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots;volumesnapshotcontents,verbs=get;list;watch;create;delete
 
-// Reconcile drives a Branch to a Bound PVC: on-demand VSC + VS + PVC from the
-// source's snapshot handle. (The pool fast path lands in a later slice; every
-// Branch currently provisions on demand.)
+// Reconcile drives a Branch to a Bound PVC — claimed from a warm pool when
+// one has stock, or provisioned on demand (VSC + VS + PVC from the source's
+// snapshot handle) otherwise.
 func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var b volumesv1alpha1.Branch
 	if err := r.Get(ctx, req.NamespacedName, &b); err != nil {
@@ -105,6 +106,7 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		b.Status.ObservedResetToken = b.Spec.ResetToken
 		b.Status.Phase = volumesv1alpha1.BranchCloning
 		b.Status.Provisioning = ""
+		b.Status.ClaimedVolume = ""
 		b.Status.ClonedBytes = 0
 		b.Status.ExpiresAt = nil
 		b.Status.Message = ""
@@ -158,10 +160,56 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 }
 
-// ensureClone creates the on-demand clone object set (create-or-ignore-exists):
-// per-branch VolumeSnapshotContent + VolumeSnapshot + the consumer-named PVC.
+// ensureClone provisions the clone. The pool fast path is tried first: a
+// pre-warmed Bound PVC is claimed by metadata alone — no CreateVolume — so
+// the Branch is Ready in seconds even on backends with slow clones. On a
+// pool miss the on-demand object set is created instead. status.provisioning
+// records the path taken because the two leave different objects behind and
+// teardown depends on it.
 func (r *BranchReconciler) ensureClone(ctx context.Context, b *volumesv1alpha1.Branch, src *volumesv1alpha1.BranchSource) error {
+	// A terminating consumer PVC is a previous clone still being deleted
+	// (reset in flight). Provisioning anything now would either re-adopt the
+	// corpse or collide with its name — wait for the deletion to finish; the
+	// caller's requeue re-enters here.
+	var existing corev1.PersistentVolumeClaim
+	if err := r.Get(ctx, client.ObjectKey{Name: b.Spec.PVCName, Namespace: b.Namespace}, &existing); err == nil {
+		if existing.DeletionTimestamp != nil {
+			return nil
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	// Established or recorded pool claim: resume the rebind. The PV name in
+	// status is authoritative — the warm PVC may already be destroyed.
+	if b.Status.ClaimedVolume != "" {
+		poolPVC, err := pool.FindClaimedPVC(ctx, r.Client, src.Name, string(b.UID))
+		if err != nil {
+			return err
+		}
+		return pool.FinishClaim(ctx, r.Client, b, src, b.Status.ClaimedVolume, poolPVC)
+	}
 	if b.Status.Provisioning == "" {
+		// The claim is two-phase: TryClaim only flips labels (non-destructive),
+		// then the claim is durably recorded on the Branch, and only then does
+		// FinishClaim start consuming the warm clone. A failure between flip
+		// and record is recovered by TryClaim's resume path (claimant label);
+		// a failure after the record is recovered by the status branch above.
+		// Recording AFTER destruction would lose the claim on a mid-rebind
+		// conflict and silently fall back to on-demand, leaking the PV.
+		pvName, poolPVC, found, err := pool.TryClaim(ctx, r.Client, b, src)
+		if err != nil {
+			return err
+		}
+		if found {
+			b.Status.ClaimedVolume = pvName
+			b.Status.Provisioning = volumesv1alpha1.ProvisionedFromPool
+			b.Status.Phase = volumesv1alpha1.BranchCloning
+			if err := r.Status().Update(ctx, b); err != nil {
+				return err
+			}
+			return pool.FinishClaim(ctx, r.Client, b, src, pvName, poolPVC)
+		}
 		b.Status.Provisioning = volumesv1alpha1.ProvisionedOnDemand
 		b.Status.Phase = volumesv1alpha1.BranchCloning
 		if err := r.Status().Update(ctx, b); err != nil {
@@ -188,12 +236,54 @@ func (r *BranchReconciler) ensureClone(ctx context.Context, b *volumesv1alpha1.B
 	return r.createIfAbsent(ctx, pvc)
 }
 
-// teardownClone deletes the clone object set in dependency order: PVC first
-// (the volume), then VolumeSnapshot, then VolumeSnapshotContent. On backends
-// where a snapshot pins its parent volume, deleting snapshot objects before
-// the volume objects can wedge the backend-side cleanup — the volume must go
-// first. Deletes are fired here; completion is confirmed by reconcileDelete.
+// teardownClone deletes whatever the provisioning path left behind.
+//
+// Pool provenance: the consumer PVC and its retained PV (flipped to Delete so
+// the CSI driver destroys the volume — it was deliberately kept Retain across
+// the claim rebind). The seeding snapshot pair was already deleted at claim
+// time, so there is nothing snapshot-shaped to remove.
+//
+// On-demand provenance: PVC first (the volume), then VolumeSnapshot, then
+// VolumeSnapshotContent. On backends where a snapshot pins its parent volume,
+// deleting snapshot objects before the volume can wedge the backend-side
+// cleanup — the volume must go first. Deletes are fired here; completion is
+// confirmed by reconcileDelete.
+//
+// Empty provenance still sweeps the holding namespace for a clone this
+// Branch claimed (label flipped) before ever persisting provisioning=pool —
+// a crash in that window must not leak the claimed volume.
 func (r *BranchReconciler) teardownClone(ctx context.Context, b *volumesv1alpha1.Branch) error {
+	if b.Status.Provisioning != volumesv1alpha1.ProvisionedOnDemand {
+		if err := pool.ReclaimClaimedFor(ctx, r.Client, b.Spec.Source, string(b.UID)); err != nil {
+			return err
+		}
+	}
+	if b.Status.Provisioning == volumesv1alpha1.ProvisionedFromPool {
+		pvc := &corev1.PersistentVolumeClaim{}
+		if err := r.Get(ctx, client.ObjectKey{Name: b.Spec.PVCName, Namespace: b.Namespace}, pvc); err == nil {
+			pvName := pvc.Spec.VolumeName
+			if err := r.Delete(ctx, pvc); err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
+			if pvName != "" {
+				if err := pool.DeletePV(ctx, r.Client, pvName); err != nil {
+					return err
+				}
+			}
+		} else if !apierrors.IsNotFound(err) {
+			return err
+		}
+		// The recorded claim is authoritative: it covers the window where the
+		// consumer PVC never got created (or is already gone) but the PV was
+		// claimed. Normally the same PV as above — DeletePV is idempotent.
+		if b.Status.ClaimedVolume != "" {
+			if err := pool.DeletePV(ctx, r.Client, b.Status.ClaimedVolume); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: b.Spec.PVCName, Namespace: b.Namespace},
 	}
@@ -222,13 +312,17 @@ func (r *BranchReconciler) reconcileDelete(ctx context.Context, b *volumesv1alph
 	if err := r.teardownClone(ctx, b); err != nil {
 		return ctrl.Result{}, err
 	}
-	// The VSC is cluster-scoped and unowned — confirm it is actually gone
-	// before releasing the finalizer, or it leaks until source teardown.
-	var check snapv1.VolumeSnapshotContent
-	if err := r.Get(ctx, client.ObjectKey{Name: branch.VSCName(b)}, &check); !apierrors.IsNotFound(err) {
-		// Still present (err == nil) or state unknown (transient error):
-		// requeue, keep the finalizer.
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	// On-demand teardown leaves a cluster-scoped, unowned VSC — confirm it is
+	// actually gone before releasing the finalizer, or it leaks until source
+	// teardown. Pool-claimed clones have no per-branch VSC (the seeding pair
+	// died at claim time), so the guard does not apply.
+	if b.Status.Provisioning != volumesv1alpha1.ProvisionedFromPool {
+		var check snapv1.VolumeSnapshotContent
+		if err := r.Get(ctx, client.ObjectKey{Name: branch.VSCName(b)}, &check); !apierrors.IsNotFound(err) {
+			// Still present (err == nil) or state unknown (transient error):
+			// requeue, keep the finalizer.
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
 	}
 	controllerutil.RemoveFinalizer(b, BranchFinalizer)
 	if err := r.Update(ctx, b); err != nil {

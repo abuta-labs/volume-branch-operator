@@ -77,6 +77,14 @@ type BranchStatus struct {
 	// +optional
 	Provisioning BranchProvisioning `json:"provisioning,omitempty"`
 
+	// claimedVolume is the PersistentVolume claimed from a pool for this
+	// Branch. Persisted immediately after the atomic claim and BEFORE the
+	// warm clone's objects are consumed, so the rebind can always be resumed
+	// or reclaimed — the warm PVC (the only other marker of the claim) is
+	// destroyed mid-rebind.
+	// +optional
+	ClaimedVolume string `json:"claimedVolume,omitempty"`
+
 	// clonedBytes is the clone's logical size, when known.
 	// +optional
 	ClonedBytes int64 `json:"clonedBytes,omitempty"`
