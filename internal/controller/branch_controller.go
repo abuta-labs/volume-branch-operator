@@ -92,8 +92,13 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Reset: a changed token discards the current clone and re-runs the flow.
-	// The first observation just records the baseline — no teardown.
-	if b.Status.ObservedResetToken != b.Spec.ResetToken && b.Status.ObservedResetToken != "" {
+	// Baseline vs reset is decided by whether a clone exists to tear down
+	// (status.provisioning set), never by token values: an empty token is a
+	// legitimate baseline, a branch born without a token must still reset
+	// when its first real token arrives ("" -> "t1"), and so must "t1" -> "".
+	if b.Status.Provisioning == "" {
+		b.Status.ObservedResetToken = b.Spec.ResetToken
+	} else if b.Status.ObservedResetToken != b.Spec.ResetToken {
 		if err := r.teardownClone(ctx, &b); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -109,9 +114,6 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		// Give the deletes a beat to complete before re-creating same-named
 		// objects; the requeue re-enters the create path below.
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-	}
-	if b.Status.ObservedResetToken == "" {
-		b.Status.ObservedResetToken = b.Spec.ResetToken
 	}
 
 	if err := r.ensureClone(ctx, &b, &src); err != nil {

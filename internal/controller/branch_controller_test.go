@@ -174,6 +174,42 @@ var _ = Describe("Branch Controller", func() {
 		}
 	})
 
+	It("resets a branch born without a token when its first token arrives", func() {
+		srcName := readySource(ctx)
+		b := &volumesv1alpha1.Branch{
+			ObjectMeta: metav1.ObjectMeta{Name: uniqueName("br-firsttoken"), Namespace: ns},
+			Spec:       volumesv1alpha1.BranchSpec{Source: srcName, PVCName: uniqueName("pvc")},
+		}
+		Expect(k8sClient.Create(ctx, b)).To(Succeed())
+		key := types.NamespacedName{Name: b.Name, Namespace: ns}
+		reconcileBranch(ctx, key, 2)
+		bindPVC(ctx, b.Spec.PVCName, ns)
+		reconcileBranch(ctx, key, 1)
+
+		var got volumesv1alpha1.Branch
+		Expect(k8sClient.Get(ctx, key, &got)).To(Succeed())
+		Expect(got.Status.Phase).To(Equal(volumesv1alpha1.BranchReady))
+		Expect(got.Status.ObservedResetToken).To(BeEmpty())
+
+		// "" -> "t1": the first real token must trigger a full reset, not be
+		// swallowed as a baseline observation.
+		got.Spec.ResetToken = "t1"
+		Expect(k8sClient.Update(ctx, &got)).To(Succeed())
+		reconcileBranch(ctx, key, 1)
+
+		Expect(k8sClient.Get(ctx, key, &got)).To(Succeed())
+		Expect(got.Status.ObservedResetToken).To(Equal("t1"))
+		Expect(got.Status.Phase).To(Equal(volumesv1alpha1.BranchCloning))
+		Expect(got.Status.Provisioning).To(BeEmpty())
+		var vs snapv1.VolumeSnapshot
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: branch.VSName(&got), Namespace: ns}, &vs)
+		if err == nil {
+			Expect(vs.DeletionTimestamp.IsZero()).To(BeFalse())
+		} else {
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		}
+	})
+
 	It("sets expiresAt from spec.ttl at Ready and reaps at expiry", func() {
 		srcName := readySource(ctx)
 		b := &volumesv1alpha1.Branch{
