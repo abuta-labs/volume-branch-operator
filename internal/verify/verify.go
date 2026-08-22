@@ -108,10 +108,10 @@ func Run(ctx context.Context, c client.Client, disc discovery.DiscoveryInterface
 	}
 	for i := range sources.Items {
 		src := &sources.Items[i]
-		fmt.Fprintf(w, "BranchSource %s (driver %s)\n", src.Name, src.Spec.CSIDriver)
+		_, _ = fmt.Fprintf(w, "BranchSource %s (driver %s)\n", src.Name, src.Spec.CSIDriver)
 		verifySource(ctx, c, src, pass, fail)
 		p := profile.Resolve(src)
-		fmt.Fprintf(w, "        profile: snapshotPinsVolume=%t cloneSizeMode=%s sentinel=%s maxWarmingDefault=%d\n",
+		_, _ = fmt.Fprintf(w, "        profile: snapshotPinsVolume=%t cloneSizeMode=%s sentinel=%s maxWarmingDefault=%d\n",
 			p.SnapshotPinsVolume, p.CloneSizeMode, p.CloneSizeSentinel.String(), p.MaxWarmingDefault)
 		if p.NeedsSize() && src.Status.SizeBytes == 0 && src.Spec.SizeBytes == 0 {
 			warn("actual-mode sizing with no known size yet — clone creation holds until discovery finds the originating VolumeSnapshotContent, or spec.sizeBytes is declared")
