@@ -1,0 +1,18 @@
+# Pool + branch on FSx (SKETCH — e2e pending). The pool is where FSx's
+# serialized CreateVolume (~1/min) stops hurting: claims are metadata flips.
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: BranchPool
+metadata:
+  name: golden-fsx-v1-pool
+spec:
+  source: golden-fsx-v1
+  targetWarm: 3
+---
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: Branch
+metadata:
+  name: alice-dev
+  namespace: default
+spec:
+  source: golden-fsx-v1
+  pvcName: alice-dev-data

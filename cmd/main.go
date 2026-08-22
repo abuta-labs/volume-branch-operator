@@ -17,8 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -27,8 +29,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/discovery"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -40,6 +44,7 @@ import (
 	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
 	"github.com/arbit-tech/volume-branch-operator/internal/controller"
 	"github.com/arbit-tech/volume-branch-operator/internal/pool"
+	"github.com/arbit-tech/volume-branch-operator/internal/verify"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -56,8 +61,53 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+// runVerify is `manager verify`: the read-only cluster preflight. It has its
+// own flag set because the manager's flags (metrics, leader election, ...)
+// mean nothing to a one-shot check.
+func runVerify(args []string) {
+	fs := flag.NewFlagSet("verify", flag.ExitOnError)
+	kubeconfig := fs.String("kubeconfig", "",
+		"Path to a kubeconfig (default: in-cluster config or $KUBECONFIG)")
+	_ = fs.Parse(args)
+
+	if *kubeconfig != "" {
+		// ctrl.GetConfig honors this the same way kubectl would.
+		os.Setenv("KUBECONFIG", *kubeconfig)
+	}
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "verify: cannot load cluster config: %v\n", err)
+		os.Exit(1)
+	}
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "verify: cannot build client: %v\n", err)
+		os.Exit(1)
+	}
+	disc, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "verify: cannot build discovery client: %v\n", err)
+		os.Exit(1)
+	}
+
+	outcome, err := verify.Run(context.Background(), c, disc, os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "verify: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("verify: %d failure(s), %d warning(s)\n", outcome.Failures, outcome.Warnings)
+	if !outcome.OK() {
+		os.Exit(1)
+	}
+}
+
 // nolint:gocyclo
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "verify" {
+		runVerify(os.Args[2:])
+		return
+	}
+
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string

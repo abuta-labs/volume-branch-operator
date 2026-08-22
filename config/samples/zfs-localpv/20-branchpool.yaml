@@ -1,0 +1,12 @@
+# Optional: keep clones pre-provisioned so a Branch claim is a metadata flip
+# (seconds) instead of a CreateVolume call. On instant-clone backends like
+# local ZFS a pool is a nicety; on slow-clone backends it is the difference
+# between seconds and minutes.
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: BranchPool
+metadata:
+  name: golden-v1-pool
+spec:
+  source: golden-v1
+  targetWarm: 2
+  # maxWarming defaults from the source's profile; set it to override.

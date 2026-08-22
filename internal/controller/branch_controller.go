@@ -85,12 +85,12 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	var src volumesv1alpha1.BranchSource
 	if err := r.Get(ctx, client.ObjectKey{Name: b.Spec.Source}, &src); err != nil {
 		if apierrors.IsNotFound(err) {
-			return r.setPhase(ctx, &b, volumesv1alpha1.BranchPending, "BranchSource not found")
+			return r.setPhase(ctx, &b, volumesv1alpha1.ReasonWaitingForSource, "BranchSource not found")
 		}
 		return ctrl.Result{}, err
 	}
 	if src.Status.Phase != volumesv1alpha1.BranchSourceReady {
-		return r.setPhase(ctx, &b, volumesv1alpha1.BranchPending, "waiting for BranchSource to become Ready")
+		return r.setPhase(ctx, &b, volumesv1alpha1.ReasonWaitingForSource, "waiting for BranchSource to become Ready")
 	}
 
 	// Reset: a changed token discards the current clone and re-runs the flow.
@@ -124,7 +124,7 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// mis-sized PVC wedges permanently. Hold until the source publishes its
 	// size (the source controller's probe is discovering it).
 	if prof := profile.Resolve(&src); prof.NeedsSize() && src.Status.SizeBytes == 0 && b.Status.Provisioning == "" {
-		return r.setPhase(ctx, &b, volumesv1alpha1.BranchPending, "waiting for the source size (actual-mode sizing)")
+		return r.setPhase(ctx, &b, volumesv1alpha1.ReasonWaitingForSize, "waiting for the source size (actual-mode sizing)")
 	}
 
 	if err := r.ensureClone(ctx, &b, &src); err != nil {
@@ -151,8 +151,22 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			t := metav1.NewTime(time.Now().Add(b.Spec.TTL.Duration))
 			b.Status.ExpiresAt = &t
 		}
+		setCondition(&b.Status.Conditions, metav1.Condition{
+			Type:               ConditionReady,
+			Status:             metav1.ConditionTrue,
+			Reason:             volumesv1alpha1.ReasonProvisioned,
+			Message:            "PVC " + b.Spec.PVCName + " is Bound (" + string(b.Status.Provisioning) + ")",
+			ObservedGeneration: b.Generation,
+		})
 	} else {
 		b.Status.Phase = volumesv1alpha1.BranchCloning
+		setCondition(&b.Status.Conditions, metav1.Condition{
+			Type:               ConditionReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             volumesv1alpha1.ReasonCloning,
+			Message:            "waiting for PVC " + b.Spec.PVCName + " to bind",
+			ObservedGeneration: b.Generation,
+		})
 	}
 	if err := r.Status().Update(ctx, &b); err != nil {
 		return ctrl.Result{}, err
@@ -371,9 +385,18 @@ func (r *BranchReconciler) createIfAbsent(ctx context.Context, obj client.Object
 	return nil
 }
 
-func (r *BranchReconciler) setPhase(ctx context.Context, b *volumesv1alpha1.Branch, phase volumesv1alpha1.BranchPhase, msg string) (ctrl.Result, error) {
-	if b.Status.Phase != phase || b.Status.Message != msg {
-		b.Status.Phase = phase
+// setPhase parks the Branch at Pending with a wait reason, mirrored on the
+// Ready condition.
+func (r *BranchReconciler) setPhase(ctx context.Context, b *volumesv1alpha1.Branch, reason, msg string) (ctrl.Result, error) {
+	condChanged := setCondition(&b.Status.Conditions, metav1.Condition{
+		Type:               ConditionReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: b.Generation,
+	})
+	if condChanged || b.Status.Phase != volumesv1alpha1.BranchPending || b.Status.Message != msg {
+		b.Status.Phase = volumesv1alpha1.BranchPending
 		b.Status.Message = msg
 		if err := r.Status().Update(ctx, b); err != nil {
 			return ctrl.Result{}, err
