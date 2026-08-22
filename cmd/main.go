@@ -72,7 +72,7 @@ func runVerify(args []string) {
 
 	if *kubeconfig != "" {
 		// ctrl.GetConfig honors this the same way kubectl would.
-		os.Setenv("KUBECONFIG", *kubeconfig)
+		_ = os.Setenv("KUBECONFIG", *kubeconfig)
 	}
 	cfg, err := ctrl.GetConfig()
 	if err != nil {

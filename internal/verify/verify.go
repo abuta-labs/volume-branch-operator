@@ -52,11 +52,13 @@ func (o Outcome) OK() bool { return o.Failures == 0 }
 // Run executes the preflight and renders a human-readable report to w.
 func Run(ctx context.Context, c client.Client, disc discovery.DiscoveryInterface, w io.Writer) (Outcome, error) {
 	var o Outcome
-	pass := func(format string, a ...any) { fmt.Fprintf(w, "  ok    "+format+"\n", a...) }
-	warn := func(format string, a ...any) { o.Warnings++; fmt.Fprintf(w, "  WARN  "+format+"\n", a...) }
-	fail := func(format string, a ...any) { o.Failures++; fmt.Fprintf(w, "  FAIL  "+format+"\n", a...) }
+	// Report writes go to a human; a failed write has nowhere better to go.
+	out := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format+"\n", a...) }
+	pass := func(format string, a ...any) { out("  ok    "+format, a...) }
+	warn := func(format string, a ...any) { o.Warnings++; out("  WARN  "+format, a...) }
+	fail := func(format string, a ...any) { o.Failures++; out("  FAIL  "+format, a...) }
 
-	fmt.Fprintln(w, "CRDs")
+	out("%s", "CRDs")
 	if err := checkGroup(disc, volumesv1alpha1.GroupVersion.String(),
 		[]string{"branchsources", "branchpools", "branches"}, pass, fail); err != nil {
 		return o, err
@@ -68,7 +70,7 @@ func Run(ctx context.Context, c client.Client, disc discovery.DiscoveryInterface
 		return o, err
 	}
 
-	fmt.Fprintln(w, "snapshot-controller")
+	out("%s", "snapshot-controller")
 	// A deployment named *snapshot-controller* is the stock install, but some
 	// distributions embed it elsewhere — its absence is a warning, not proof
 	// of a broken cluster.
@@ -101,7 +103,7 @@ func Run(ctx context.Context, c client.Client, disc discovery.DiscoveryInterface
 		return o, nil
 	}
 	if len(sources.Items) == 0 {
-		fmt.Fprintln(w, "BranchSources: none defined")
+		out("%s", "BranchSources: none defined")
 		return o, nil
 	}
 	for i := range sources.Items {

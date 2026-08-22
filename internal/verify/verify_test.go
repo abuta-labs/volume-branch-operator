@@ -54,7 +54,7 @@ func testScheme(t *testing.T) *runtime.Scheme {
 // fakeDisc serves the given group/versions, each with the resource names
 // mapped to it.
 func fakeDisc(groups map[string][]string) *discoveryfake.FakeDiscovery {
-	var lists []*metav1.APIResourceList
+	lists := make([]*metav1.APIResourceList, 0, len(groups))
 	for gv, names := range groups {
 		l := &metav1.APIResourceList{GroupVersion: gv}
 		for _, n := range names {
@@ -72,7 +72,8 @@ func fullDisc() *discoveryfake.FakeDiscovery {
 	})
 }
 
-func snapController(ready int32) *appsv1.Deployment {
+func snapController() *appsv1.Deployment {
+	const ready = 1
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: "snapshot-controller", Namespace: "kube-system"},
 		Status:     appsv1.DeploymentStatus{ReadyReplicas: ready},
@@ -115,7 +116,7 @@ func run(t *testing.T, disc *discoveryfake.FakeDiscovery, objs ...client.Object)
 }
 
 func TestVerifyHappyPath(t *testing.T) {
-	objs := append(validSource("src"), snapController(1))
+	objs := append(validSource("src"), snapController())
 	o, report := run(t, fullDisc(), objs...)
 	if o.Failures != 0 {
 		t.Fatalf("expected 0 failures, got %d:\n%s", o.Failures, report)
@@ -132,7 +133,7 @@ func TestVerifyMissingSnapshotCRDs(t *testing.T) {
 	disc := fakeDisc(map[string][]string{
 		"volumes.arbit-tech.com/v1alpha1": {"branchsources", "branchpools", "branches"},
 	})
-	o, report := run(t, disc, snapController(1))
+	o, report := run(t, disc, snapController())
 	if o.Failures != 3 {
 		t.Fatalf("expected 3 failures (one per snapshot CRD), got %d:\n%s", o.Failures, report)
 	}
@@ -154,7 +155,7 @@ func TestVerifyNoSnapshotController(t *testing.T) {
 func TestVerifySourceProblems(t *testing.T) {
 	// Missing StorageClass + mismatched snapshot-class driver: two failures.
 	objs := []client.Object{
-		snapController(1),
+		snapController(),
 		&snapv1.VolumeSnapshotClass{
 			ObjectMeta:     metav1.ObjectMeta{Name: "other-vsc"},
 			Driver:         "other.example.com",
@@ -181,7 +182,7 @@ func TestVerifySourceProblems(t *testing.T) {
 }
 
 func TestVerifyActualModeSizeWarning(t *testing.T) {
-	objs := append(validSource("src"), snapController(1))
+	objs := append(validSource("src"), snapController())
 	// Strip the declared size: actual mode with no size anywhere must warn.
 	for _, obj := range objs {
 		if src, ok := obj.(*volumesv1alpha1.BranchSource); ok {
