@@ -33,10 +33,11 @@ run.
 
 ## Status
 
-**Pre-release — extraction in progress.** The engine is being extracted from the
-production operator behind [Adjoint](https://adjoint.sh), where it runs branchable
-Postgres environments on AWS FSx for OpenZFS. Until the extraction lands and the e2e
-suite passes on a second (non-FSx) CSI driver, expect the API to change without notice.
+**Pre-release — under construction.** The design is proven in production by the operator behind
+[Adjoint](https://adjoint.sh), which runs branchable
+Postgres environments on AWS FSx for OpenZFS; this repo is a standalone, generalized
+build of that engine. Until the e2e
+suite passes on two CSI drivers, expect the API to change without notice.
 
 ## License
 
