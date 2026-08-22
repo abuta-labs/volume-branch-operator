@@ -25,6 +25,8 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -50,13 +52,6 @@ const (
 // --pool-namespace manager flag at startup.
 var HoldingNamespace = "branch-pool"
 
-// MaxWarmingDefault caps concurrent warm-clone creations when
-// BranchPool.spec.maxWarming is unset. The default suits backends that
-// serialize CreateVolume (some serialize to ~1/min — flooding them just
-// queues failures); fast-clone backends can raise it per pool. The substrate
-// profile takes this seam over in a later phase.
-var MaxWarmingDefault int32 = 2
-
 // WarmSet is the trio that materializes one pre-warmed clone PVC.
 type WarmSet struct {
 	VSC *snapv1.VolumeSnapshotContent // cluster-scoped, Retain, over the source's shared snapshot handle
@@ -73,7 +68,9 @@ func warmPVCName(cloneID string) string { return "branch-warm-" + cloneID }
 // deleting the pool GC-cascades the warm set even if the operator is down;
 // the pool finalizer still tears them down in order first, because GC order
 // is arbitrary and snapshot-pins-volume backends need volume-before-snapshot.
-func BuildWarmSet(bp *volumesv1alpha1.BranchPool, src *volumesv1alpha1.BranchSource, cloneID string) WarmSet {
+// size is the warm PVC's capacity request, from the source's substrate
+// profile.
+func BuildWarmSet(bp *volumesv1alpha1.BranchPool, src *volumesv1alpha1.BranchSource, cloneID string, size resource.Quantity) WarmSet {
 	labels := map[string]string{
 		LabelSource:    src.Name,
 		LabelPoolState: StateWarm,
@@ -135,7 +132,7 @@ func BuildWarmSet(bp *volumesv1alpha1.BranchPool, src *volumesv1alpha1.BranchSou
 			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			StorageClassName: &src.Spec.CloneStorageClassName,
 			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: branch.CloneSizeRequest},
+				Requests: corev1.ResourceList{corev1.ResourceStorage: size},
 			},
 			DataSource: &corev1.TypedLocalObjectReference{
 				APIGroup: &apiGroup,
@@ -170,8 +167,10 @@ func DeleteSnapshotPair(ctx context.Context, c client.Client, cloneID string) er
 
 // buildClaimPVC is the consumer-named PVC statically bound to the claimed PV.
 // storageClassName must repeat the PV's class or the binder silently refuses
-// the bind; no dataSource — the volume already exists.
-func buildClaimPVC(b *volumesv1alpha1.Branch, src *volumesv1alpha1.BranchSource, pvName string) *corev1.PersistentVolumeClaim {
+// the bind; no dataSource — the volume already exists. The request repeats
+// the PV's own capacity: a request above it can never bind, and profile
+// sizing may have changed between warm creation and claim.
+func buildClaimPVC(b *volumesv1alpha1.Branch, src *volumesv1alpha1.BranchSource, pvName string, capacity resource.Quantity) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      b.Spec.PVCName,
@@ -186,7 +185,7 @@ func buildClaimPVC(b *volumesv1alpha1.Branch, src *volumesv1alpha1.BranchSource,
 			StorageClassName: &src.Spec.CloneStorageClassName,
 			VolumeName:       pvName,
 			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: branch.CloneSizeRequest},
+				Requests: corev1.ResourceList{corev1.ResourceStorage: capacity},
 			},
 		},
 	}
@@ -314,7 +313,11 @@ func FinishClaim(ctx context.Context, c client.Client, b *volumesv1alpha1.Branch
 			return err
 		}
 	}
-	if err := c.Create(ctx, buildClaimPVC(b, src, pvName)); client.IgnoreAlreadyExists(err) != nil {
+	capacity := pv.Spec.Capacity[corev1.ResourceStorage]
+	if capacity.IsZero() {
+		capacity = resource.MustParse("1Gi") // defensive; a provisioned PV always has capacity
+	}
+	if err := c.Create(ctx, buildClaimPVC(b, src, pvName, capacity)); client.IgnoreAlreadyExists(err) != nil {
 		return err
 	}
 	return nil

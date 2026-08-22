@@ -32,6 +32,7 @@ import (
 	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
 	"github.com/arbit-tech/volume-branch-operator/internal/branch"
 	"github.com/arbit-tech/volume-branch-operator/internal/pool"
+	"github.com/arbit-tech/volume-branch-operator/internal/profile"
 )
 
 // BranchFinalizer gates Branch deletion on clone teardown: PVC, then
@@ -100,7 +101,7 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if b.Status.Provisioning == "" {
 		b.Status.ObservedResetToken = b.Spec.ResetToken
 	} else if b.Status.ObservedResetToken != b.Spec.ResetToken {
-		if err := r.teardownClone(ctx, &b); err != nil {
+		if err := r.teardownClone(ctx, &b, profile.Resolve(&src).SnapshotPinsVolume); err != nil {
 			return ctrl.Result{}, err
 		}
 		b.Status.ObservedResetToken = b.Spec.ResetToken
@@ -116,6 +117,14 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		// Give the deletes a beat to complete before re-creating same-named
 		// objects; the requeue re-enters the create path below.
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
+	// Actual-mode sizing may not guess: a sentinel-sized request below the
+	// snapshot's restore size is refused by size-enforcing drivers and the
+	// mis-sized PVC wedges permanently. Hold until the source publishes its
+	// size (the source controller's probe is discovering it).
+	if prof := profile.Resolve(&src); prof.NeedsSize() && src.Status.SizeBytes == 0 && b.Status.Provisioning == "" {
+		return r.setPhase(ctx, &b, volumesv1alpha1.BranchPending, "waiting for the source size (actual-mode sizing)")
 	}
 
 	if err := r.ensureClone(ctx, &b, &src); err != nil {
@@ -229,7 +238,8 @@ func (r *BranchReconciler) ensureClone(ctx context.Context, b *volumesv1alpha1.B
 	if err := r.createIfAbsent(ctx, vs); err != nil {
 		return err
 	}
-	pvc := branch.BuildPVC(b, src)
+	size := profile.Resolve(src).SizeRequest(src.Status.SizeBytes)
+	pvc := branch.BuildPVC(b, src, size)
 	if err := controllerutil.SetControllerReference(b, pvc, r.Scheme); err != nil {
 		return err
 	}
@@ -252,7 +262,13 @@ func (r *BranchReconciler) ensureClone(ctx context.Context, b *volumesv1alpha1.B
 // Empty provenance still sweeps the holding namespace for a clone this
 // Branch claimed (label flipped) before ever persisting provisioning=pool —
 // a crash in that window must not leak the claimed volume.
-func (r *BranchReconciler) teardownClone(ctx context.Context, b *volumesv1alpha1.Branch) error {
+// teardownClone deletes the Branch's clone objects. pinsVolume is the
+// source profile's SnapshotPinsVolume: with it set, volume objects are
+// deleted before snapshot objects (per-branch snapshot objects here are all
+// Retain-policy — Kubernetes-object-only — so today the order is a
+// consistency discipline; it becomes load-bearing wherever a teardown
+// performs physical deletions).
+func (r *BranchReconciler) teardownClone(ctx context.Context, b *volumesv1alpha1.Branch, pinsVolume bool) error {
 	if b.Status.Provisioning != volumesv1alpha1.ProvisionedOnDemand {
 		if err := pool.ReclaimClaimedFor(ctx, r.Client, b.Spec.Source, string(b.UID)); err != nil {
 			return err
@@ -284,32 +300,49 @@ func (r *BranchReconciler) teardownClone(ctx context.Context, b *volumesv1alpha1
 		return nil
 	}
 
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: b.Spec.PVCName, Namespace: b.Namespace},
+	deletePVC := func() error {
+		pvc := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: b.Spec.PVCName, Namespace: b.Namespace},
+		}
+		return client.IgnoreNotFound(r.Delete(ctx, pvc))
 	}
-	if err := r.Delete(ctx, pvc); err != nil && !apierrors.IsNotFound(err) {
+	deleteSnaps := func() error {
+		vs := &snapv1.VolumeSnapshot{
+			ObjectMeta: metav1.ObjectMeta{Name: branch.VSName(b), Namespace: b.Namespace},
+		}
+		if err := r.Delete(ctx, vs); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		vsc := &snapv1.VolumeSnapshotContent{
+			ObjectMeta: metav1.ObjectMeta{Name: branch.VSCName(b)},
+		}
+		return client.IgnoreNotFound(r.Delete(ctx, vsc))
+	}
+	if pinsVolume {
+		if err := deletePVC(); err != nil {
+			return err
+		}
+		return deleteSnaps()
+	}
+	if err := deleteSnaps(); err != nil {
 		return err
 	}
-	vs := &snapv1.VolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{Name: branch.VSName(b), Namespace: b.Namespace},
-	}
-	if err := r.Delete(ctx, vs); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	vsc := &snapv1.VolumeSnapshotContent{
-		ObjectMeta: metav1.ObjectMeta{Name: branch.VSCName(b)},
-	}
-	if err := r.Delete(ctx, vsc); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
+	return deletePVC()
 }
 
 func (r *BranchReconciler) reconcileDelete(ctx context.Context, b *volumesv1alpha1.Branch) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(b, BranchFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	if err := r.teardownClone(ctx, b); err != nil {
+	// The source may already be gone at delete time (source-cascade deletes
+	// branches first, but a user can also delete out of order); fall back to
+	// the conservative pins=true ordering, which is safe on every backend.
+	pins := true
+	var src volumesv1alpha1.BranchSource
+	if err := r.Get(ctx, client.ObjectKey{Name: b.Spec.Source}, &src); err == nil {
+		pins = profile.Resolve(&src).SnapshotPinsVolume
+	}
+	if err := r.teardownClone(ctx, b, pins); err != nil {
 		return ctrl.Result{}, err
 	}
 	// On-demand teardown leaves a cluster-scoped, unowned VSC — confirm it is

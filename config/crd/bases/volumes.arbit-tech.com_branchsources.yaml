@@ -21,6 +21,9 @@ spec:
     - jsonPath: .status.sizeBytes
       name: Size
       type: integer
+    - jsonPath: .status.resolvedProfile.cloneSizeMode
+      name: Sizing
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -63,6 +66,50 @@ spec:
                   (e.g. fsx.openzfs.csi.aws.com, zfs.csi.openebs.io).
                 minLength: 1
                 type: string
+              profile:
+                description: profile overrides the built-in substrate profile for
+                  spec.csiDriver.
+                properties:
+                  cloneSizeMode:
+                    description: cloneSizeMode selects sentinel or actual clone sizing.
+                    enum:
+                    - sentinel
+                    - actual
+                    type: string
+                  cloneSizeSentinel:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: |-
+                      cloneSizeSentinel is the placeholder capacity requested in sentinel
+                      mode (and the fallback in actual mode while the source size is still
+                      unknown).
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  maxWarmingDefault:
+                    description: |-
+                      maxWarmingDefault caps concurrent warm-clone creations for pools of
+                      this source when BranchPool.spec.maxWarming is unset.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  snapshotPinsVolume:
+                    description: |-
+                      snapshotPinsVolume declares that on this backend a snapshot pins its
+                      parent volume, so teardown must remove volume objects before snapshot
+                      objects.
+                    type: boolean
+                type: object
+              sizeBytes:
+                description: |-
+                  sizeBytes declares the snapshot's logical size. Optional: normally the
+                  engine discovers it from a VolumeSnapshotContent whose snapshotHandle
+                  matches (the snapshot's originating content carries restoreSize).
+                  Declare it when that content no longer exists — actual-mode sizing
+                  cannot proceed with an unknown size.
+                format: int64
+                minimum: 1
+                type: integer
               snapshotHandle:
                 description: |-
                   snapshotHandle is the CSI snapshot handle (driver-specific id) of the
@@ -94,6 +141,31 @@ spec:
                 - Ready
                 - Invalid
                 type: string
+              resolvedProfile:
+                description: |-
+                  resolvedProfile is the effective substrate profile: the built-in
+                  profile for spec.csiDriver with spec.profile overrides applied.
+                properties:
+                  cloneSizeMode:
+                    description: CloneSizeMode selects how clone PVC capacity requests
+                      are computed.
+                    enum:
+                    - sentinel
+                    - actual
+                    type: string
+                  cloneSizeSentinel:
+                    type: string
+                  maxWarmingDefault:
+                    format: int32
+                    type: integer
+                  snapshotPinsVolume:
+                    type: boolean
+                required:
+                - cloneSizeMode
+                - cloneSizeSentinel
+                - maxWarmingDefault
+                - snapshotPinsVolume
+                type: object
               sizeBytes:
                 description: sizeBytes is the logical size of the source snapshot,
                   when known.

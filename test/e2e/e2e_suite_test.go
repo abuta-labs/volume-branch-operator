@@ -55,6 +55,15 @@ var _ = BeforeSuite(func() {
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to deploy the operator")
 
+	// The image tag is constant, so on a reused cluster (a prior failed run
+	// leaves it up) an unchanged manifest triggers no rollout and the OLD
+	// binary keeps running — a freshly kind-loaded image is only picked up
+	// by a restart. Cost on a fresh cluster: one extra pod start.
+	cmd = exec.Command("kubectl", "-n", "volume-branch-operator-system", "rollout",
+		"restart", "deploy/volume-branch-operator-controller-manager")
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to restart the operator")
+
 	cmd = exec.Command("kubectl", "-n", "volume-branch-operator-system", "rollout",
 		"status", "deploy/volume-branch-operator-controller-manager", "--timeout=180s")
 	_, err = utils.Run(cmd)

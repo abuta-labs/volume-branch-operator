@@ -23,6 +23,7 @@ import (
 
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -31,6 +32,7 @@ import (
 
 	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
 	"github.com/arbit-tech/volume-branch-operator/internal/branch"
+	"github.com/arbit-tech/volume-branch-operator/internal/profile"
 )
 
 // SourceFinalizer gates BranchSource deletion on the cascade: every Branch of
@@ -71,9 +73,37 @@ func (r *BranchSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	phase, msg := r.validate(ctx, &src)
-	if src.Status.Phase != phase || src.Status.Message != msg {
+	prof := profile.Resolve(&src)
+	resolved := prof.Resolved()
+
+	// Size discovery. The source is defined by a bare snapshot handle, which
+	// carries no size, but actual-mode sizing may not proceed without one
+	// (profile.NeedsSize). Order: an explicit spec.sizeBytes declaration
+	// wins; otherwise scan VolumeSnapshotContents for one whose
+	// snapshotHandle matches and read the sidecar's restoreSize off it —
+	// the snapshot's originating (dynamically provisioned) content carries
+	// it. A statically bound content does NOT (sidecars fill restoreSize at
+	// cut time only — verified on zfs-localpv), which is why the engine
+	// cannot mint its own probe object and must find an original.
+	// Discovered once, the size sticks.
+	sizeBytes := src.Status.SizeBytes
+	if src.Spec.SizeBytes > 0 {
+		sizeBytes = src.Spec.SizeBytes
+	}
+	if sizeBytes == 0 && phase == volumesv1alpha1.BranchSourceReady && prof.NeedsSize() {
+		var err error
+		if sizeBytes, err = r.discoverSizeBytes(ctx, &src); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if src.Status.Phase != phase || src.Status.Message != msg ||
+		src.Status.SizeBytes != sizeBytes ||
+		!apiequality.Semantic.DeepEqual(src.Status.ResolvedProfile, resolved) {
 		src.Status.Phase = phase
 		src.Status.Message = msg
+		src.Status.SizeBytes = sizeBytes
+		src.Status.ResolvedProfile = resolved
 		if err := r.Status().Update(ctx, &src); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -82,7 +112,34 @@ func (r *BranchSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// The missing class may be created later; poll rather than wedge.
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
+	if sizeBytes == 0 && prof.NeedsSize() {
+		// Clone creation is holding on the size; keep scanning. The message
+		// (set above via validate? no — here) tells the operator the way out.
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
 	return ctrl.Result{}, nil
+}
+
+// discoverSizeBytes scans VolumeSnapshotContents for one whose
+// snapshotHandle matches the source's and reports a restore size — in the
+// common flow, the snapshot's originating content. Returns 0 when none does
+// (the operator then either recreates/keeps that content or declares
+// spec.sizeBytes).
+func (r *BranchSourceReconciler) discoverSizeBytes(ctx context.Context, src *volumesv1alpha1.BranchSource) (int64, error) {
+	var vscs snapv1.VolumeSnapshotContentList
+	if err := r.List(ctx, &vscs); err != nil {
+		return 0, err
+	}
+	for i := range vscs.Items {
+		st := vscs.Items[i].Status
+		if st == nil || st.SnapshotHandle == nil || *st.SnapshotHandle != src.Spec.SnapshotHandle {
+			continue
+		}
+		if st.RestoreSize != nil && *st.RestoreSize > 0 {
+			return *st.RestoreSize, nil
+		}
+	}
+	return 0, nil
 }
 
 // validate checks that the referenced classes exist and are mutually
