@@ -26,6 +26,8 @@ import (
 	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
 )
 
+const gib = "1Gi"
+
 func srcWith(driver string, o *volumesv1alpha1.ProfileOverrides) *volumesv1alpha1.BranchSource {
 	return &volumesv1alpha1.BranchSource{
 		ObjectMeta: metav1.ObjectMeta{Name: "s"},
@@ -73,7 +75,7 @@ func TestBuiltinUnknownDriverIsConservative(t *testing.T) {
 	if p.MaxWarmingDefault != 2 {
 		t.Errorf("unknown driver: MaxWarmingDefault = %d, want 2", p.MaxWarmingDefault)
 	}
-	if got := p.CloneSizeSentinel.String(); got != "1Gi" {
+	if got := p.CloneSizeSentinel.String(); got != gib {
 		t.Errorf("unknown driver: sentinel = %s, want 1Gi", got)
 	}
 }
@@ -108,8 +110,8 @@ func TestResolveNilOverridesIsBuiltin(t *testing.T) {
 }
 
 func TestSizeRequest(t *testing.T) {
-	actual := Profile{CloneSizeMode: volumesv1alpha1.CloneSizeModeActual, CloneSizeSentinel: resource.MustParse("1Gi")}
-	sentinel := Profile{CloneSizeMode: volumesv1alpha1.CloneSizeModeSentinel, CloneSizeSentinel: resource.MustParse("1Gi")}
+	actual := Profile{CloneSizeMode: volumesv1alpha1.CloneSizeModeActual, CloneSizeSentinel: resource.MustParse(gib)}
+	sentinel := Profile{CloneSizeMode: volumesv1alpha1.CloneSizeModeSentinel, CloneSizeSentinel: resource.MustParse(gib)}
 
 	// Actual mode rounds up to 1Mi.
 	if got := actual.SizeRequest(1<<30 + 1); got.Value() != 1<<30+1<<20 {
@@ -120,11 +122,11 @@ func TestSizeRequest(t *testing.T) {
 		t.Errorf("actual: got %d bytes, want exactly 2Gi", got.Value())
 	}
 	// Unknown size in actual mode falls back to the sentinel.
-	if got := actual.SizeRequest(0); got.String() != "1Gi" {
+	if got := actual.SizeRequest(0); got.String() != gib {
 		t.Errorf("actual with unknown size: got %s, want sentinel 1Gi", got.String())
 	}
 	// Sentinel mode ignores the size entirely.
-	if got := sentinel.SizeRequest(64 << 30); got.String() != "1Gi" {
+	if got := sentinel.SizeRequest(64 << 30); got.String() != gib {
 		t.Errorf("sentinel: got %s, want 1Gi", got.String())
 	}
 }
@@ -132,7 +134,7 @@ func TestSizeRequest(t *testing.T) {
 func TestResolvedRendering(t *testing.T) {
 	r := Builtin("zfs.csi.openebs.io").Resolved()
 	if r.CloneSizeMode != volumesv1alpha1.CloneSizeModeActual || r.MaxWarmingDefault != 8 ||
-		r.SnapshotPinsVolume || r.CloneSizeSentinel != "1Gi" {
+		r.SnapshotPinsVolume || r.CloneSizeSentinel != gib {
 		t.Errorf("Resolved() = %+v", r)
 	}
 }
