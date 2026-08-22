@@ -1,0 +1,21 @@
+# StorageClass for clone PVCs on FSx for OpenZFS (SKETCH — e2e pending).
+# Parameter names follow the aws-fsx-openzfs-csi-driver's dynamic volume
+# provisioning; snapshot-sourced PVCs become OpenZFS child volumes.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: branch-clone-fsx
+provisioner: fsx.openzfs.csi.aws.com
+volumeBindingMode: Immediate   # engine PVCs have no consumer pod at provisioning time
+parameters:
+  ResourceType: volume
+  ParentVolumeId: '"fsvol-REPLACE"'
+  CopyTagsToSnapshots: 'false'
+  NfsExports: '[{"ClientConfigurations": [{"Clients": "*", "Options": ["rw","crossmnt","no_root_squash"]}]}]'
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: branch-snap-fsx
+driver: fsx.openzfs.csi.aws.com
+deletionPolicy: Delete

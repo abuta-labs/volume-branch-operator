@@ -121,11 +121,41 @@ const (
 	BranchSourceInvalid BranchSourcePhase = "Invalid"
 )
 
+// Reasons for the BranchSource Ready condition.
+const (
+	// ReasonValidated: classes exist, drivers agree, and (in actual sizing
+	// mode) the size is known — clones can be created from this source now.
+	ReasonValidated = "Validated"
+	// ReasonClassMissing: the referenced StorageClass or VolumeSnapshotClass
+	// does not exist.
+	ReasonClassMissing = "ClassMissing"
+	// ReasonDriverMismatch: a referenced class belongs to a different CSI
+	// driver than spec.csiDriver.
+	ReasonDriverMismatch = "DriverMismatch"
+	// ReasonValidationError: validation could not complete (transient API
+	// error); it will be retried.
+	ReasonValidationError = "ValidationError"
+	// ReasonSizeUnknown: the source validates but actual-mode sizing is
+	// holding clone creation until the snapshot's size is known (discovered
+	// from its originating VolumeSnapshotContent, or declared in
+	// spec.sizeBytes).
+	ReasonSizeUnknown = "SizeUnknown"
+)
+
 // BranchSourceStatus defines the observed state of BranchSource.
 type BranchSourceStatus struct {
 	// phase is the validation state of the source.
 	// +optional
 	Phase BranchSourcePhase `json:"phase,omitempty"`
+
+	// conditions describe the source's readiness for branching. The Ready
+	// condition is stricter than phase: it is True only when clones can be
+	// created right now (so a validated source holding for size discovery is
+	// phase=Ready but Ready=False/SizeUnknown).
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// sizeBytes is the logical size of the source snapshot, when known.
 	// +optional

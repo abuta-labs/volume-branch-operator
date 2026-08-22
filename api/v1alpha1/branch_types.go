@@ -65,12 +65,33 @@ const (
 	ProvisionedOnDemand BranchProvisioning = "ondemand"
 )
 
+// Reasons for the Branch Ready condition.
+const (
+	// ReasonWaitingForSource: the BranchSource is missing or not Ready yet.
+	ReasonWaitingForSource = "WaitingForSource"
+	// ReasonWaitingForSize: the source is validated but actual-mode sizing
+	// is holding clone creation until the source size is known.
+	ReasonWaitingForSize = "WaitingForSize"
+	// ReasonCloning: clone objects exist; waiting for the PVC to bind.
+	ReasonCloning = "Cloning"
+	// ReasonProvisioned: the consumer-named PVC is Bound. The condition
+	// message records the path taken (pool claim or on-demand clone).
+	ReasonProvisioned = "Provisioned"
+)
+
 // BranchStatus defines the observed state of Branch.
 type BranchStatus struct {
 	// phase ends at Ready when the named PVC is Bound. What runs on the
 	// volume afterwards is the consumer's business.
 	// +optional
 	Phase BranchPhase `json:"phase,omitempty"`
+
+	// conditions mirror the lifecycle as standard conditions; the Ready
+	// condition is True exactly when phase is Ready.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// provisioning records the claim path taken (pool fast path vs
 	// on-demand clone).

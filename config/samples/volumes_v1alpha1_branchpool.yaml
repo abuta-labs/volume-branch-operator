@@ -1,9 +1,8 @@
+# Minimal BranchPool: keeps 2 pre-warmed clones of the sample source.
 apiVersion: volumes.arbit-tech.com/v1alpha1
 kind: BranchPool
 metadata:
-  labels:
-    app.kubernetes.io/name: volume-branch-operator
-    app.kubernetes.io/managed-by: kustomize
   name: branchpool-sample
 spec:
-  # TODO(user): Add fields here
+  source: branchsource-sample
+  targetWarm: 2

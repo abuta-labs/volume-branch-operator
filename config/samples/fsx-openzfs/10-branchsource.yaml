@@ -1,0 +1,11 @@
+# BranchSource on FSx (SKETCH — e2e pending). The built-in profile already
+# sets sentinel sizing, snapshot-pins-volume ordering, and maxWarming 2.
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: BranchSource
+metadata:
+  name: golden-fsx-v1
+spec:
+  snapshotHandle: REPLACE_WITH_SNAPSHOT_HANDLE   # e.g. fsvolsnap-...
+  csiDriver: fsx.openzfs.csi.aws.com
+  cloneStorageClassName: branch-clone-fsx
+  volumeSnapshotClassName: branch-snap-fsx

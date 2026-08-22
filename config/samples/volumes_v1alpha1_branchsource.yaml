@@ -1,9 +1,11 @@
+# Minimal BranchSource. See config/samples/zfs-localpv/ for a complete,
+# commented walk-through on a proven driver.
 apiVersion: volumes.arbit-tech.com/v1alpha1
 kind: BranchSource
 metadata:
-  labels:
-    app.kubernetes.io/name: volume-branch-operator
-    app.kubernetes.io/managed-by: kustomize
   name: branchsource-sample
 spec:
-  # TODO(user): Add fields here
+  snapshotHandle: pvc-0000-snap-0000        # CSI snapshot handle to branch from
+  csiDriver: zfs.csi.openebs.io
+  cloneStorageClassName: branch-clone
+  volumeSnapshotClassName: branch-snap

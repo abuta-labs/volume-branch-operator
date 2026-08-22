@@ -1,0 +1,15 @@
+# One branch. Namespaced: the PVC lands in this Branch's namespace under the
+# name you choose (the engine never invents names — point your workload at
+# pvcName and it will find its volume).
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: Branch
+metadata:
+  name: alice-dev
+  namespace: default
+spec:
+  source: golden-v1
+  pvcName: alice-dev-data
+  # Change resetToken to throw away writes and re-branch from the source:
+  # resetToken: "2"
+  # Or let the branch clean itself up:
+  # ttl: 4h

@@ -1,0 +1,12 @@
+# Snapshot of your seed PVC ("seed-data" here — a PVC of the branch-clone
+# class you filled with the dataset to branch from). Its bound
+# VolumeSnapshotContent carries the snapshotHandle for the BranchSource and
+# the restoreSize the engine's actual-mode sizing discovers.
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: seed-snap
+spec:
+  volumeSnapshotClassName: branch-snap
+  source:
+    persistentVolumeClaimName: seed-data

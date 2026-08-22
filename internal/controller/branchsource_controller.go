@@ -25,6 +25,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -72,7 +73,7 @@ func (r *BranchSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	phase, msg := r.validate(ctx, &src)
+	phase, reason, msg := r.validate(ctx, &src)
 	prof := profile.Resolve(&src)
 	resolved := prof.Resolved()
 
@@ -97,7 +98,35 @@ func (r *BranchSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	if src.Status.Phase != phase || src.Status.Message != msg ||
+	// The Ready condition is stricter than phase: a validated source that is
+	// still holding for size discovery (actual-mode sizing) validates fine
+	// but cannot produce clones yet, and consumers watching conditions should
+	// see that as not-Ready with a reason naming the way out.
+	sizeHolding := phase == volumesv1alpha1.BranchSourceReady && prof.NeedsSize() && sizeBytes == 0
+	cond := metav1.Condition{
+		Type:               ConditionReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             volumesv1alpha1.ReasonValidated,
+		Message:            "clones can be created from this source",
+		ObservedGeneration: src.Generation,
+	}
+	switch {
+	case phase == volumesv1alpha1.BranchSourcePending:
+		cond.Status = metav1.ConditionUnknown
+		cond.Reason = volumesv1alpha1.ReasonValidationError
+		cond.Message = msg
+	case phase == volumesv1alpha1.BranchSourceInvalid:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = reason
+		cond.Message = msg
+	case sizeHolding:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = volumesv1alpha1.ReasonSizeUnknown
+		cond.Message = "actual-mode sizing is holding clone creation: no VolumeSnapshotContent reports a restoreSize for this snapshotHandle — keep the snapshot's originating content, or declare spec.sizeBytes"
+	}
+
+	condChanged := setCondition(&src.Status.Conditions, cond)
+	if condChanged || src.Status.Phase != phase || src.Status.Message != msg ||
 		src.Status.SizeBytes != sizeBytes ||
 		!apiequality.Semantic.DeepEqual(src.Status.ResolvedProfile, resolved) {
 		src.Status.Phase = phase
@@ -112,9 +141,8 @@ func (r *BranchSourceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// The missing class may be created later; poll rather than wedge.
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
-	if sizeBytes == 0 && prof.NeedsSize() {
-		// Clone creation is holding on the size; keep scanning. The message
-		// (set above via validate? no — here) tells the operator the way out.
+	if sizeHolding {
+		// Clone creation is holding on the size; keep scanning.
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	return ctrl.Result{}, nil
@@ -145,35 +173,35 @@ func (r *BranchSourceReconciler) discoverSizeBytes(ctx context.Context, src *vol
 // validate checks that the referenced classes exist and are mutually
 // consistent: both must belong to the CSI driver that owns the snapshot
 // handle, or clone PVCs would be provisioned by a driver that has never
-// heard of the snapshot.
-func (r *BranchSourceReconciler) validate(ctx context.Context, src *volumesv1alpha1.BranchSource) (volumesv1alpha1.BranchSourcePhase, string) {
+// heard of the snapshot. The returned reason feeds the Ready condition.
+func (r *BranchSourceReconciler) validate(ctx context.Context, src *volumesv1alpha1.BranchSource) (volumesv1alpha1.BranchSourcePhase, string, string) {
 	var sc storagev1.StorageClass
 	if err := r.Get(ctx, client.ObjectKey{Name: src.Spec.CloneStorageClassName}, &sc); err != nil {
 		if apierrors.IsNotFound(err) {
-			return volumesv1alpha1.BranchSourceInvalid,
+			return volumesv1alpha1.BranchSourceInvalid, volumesv1alpha1.ReasonClassMissing,
 				fmt.Sprintf("StorageClass %q not found", src.Spec.CloneStorageClassName)
 		}
-		return volumesv1alpha1.BranchSourcePending, err.Error()
+		return volumesv1alpha1.BranchSourcePending, volumesv1alpha1.ReasonValidationError, err.Error()
 	}
 	if sc.Provisioner != src.Spec.CSIDriver {
-		return volumesv1alpha1.BranchSourceInvalid,
+		return volumesv1alpha1.BranchSourceInvalid, volumesv1alpha1.ReasonDriverMismatch,
 			fmt.Sprintf("StorageClass %q is provisioned by %q, not spec.csiDriver %q",
 				sc.Name, sc.Provisioner, src.Spec.CSIDriver)
 	}
 	var vsc snapv1.VolumeSnapshotClass
 	if err := r.Get(ctx, client.ObjectKey{Name: src.Spec.VolumeSnapshotClassName}, &vsc); err != nil {
 		if apierrors.IsNotFound(err) {
-			return volumesv1alpha1.BranchSourceInvalid,
+			return volumesv1alpha1.BranchSourceInvalid, volumesv1alpha1.ReasonClassMissing,
 				fmt.Sprintf("VolumeSnapshotClass %q not found", src.Spec.VolumeSnapshotClassName)
 		}
-		return volumesv1alpha1.BranchSourcePending, err.Error()
+		return volumesv1alpha1.BranchSourcePending, volumesv1alpha1.ReasonValidationError, err.Error()
 	}
 	if vsc.Driver != src.Spec.CSIDriver {
-		return volumesv1alpha1.BranchSourceInvalid,
+		return volumesv1alpha1.BranchSourceInvalid, volumesv1alpha1.ReasonDriverMismatch,
 			fmt.Sprintf("VolumeSnapshotClass %q belongs to driver %q, not spec.csiDriver %q",
 				vsc.Name, vsc.Driver, src.Spec.CSIDriver)
 	}
-	return volumesv1alpha1.BranchSourceReady, ""
+	return volumesv1alpha1.BranchSourceReady, volumesv1alpha1.ReasonValidated, ""
 }
 
 // reconcileDelete cascades the source delete to its Branches, then sweeps any

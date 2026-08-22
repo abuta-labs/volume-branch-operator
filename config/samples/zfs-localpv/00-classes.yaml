@@ -1,0 +1,24 @@
+# StorageClass for clone PVCs. poolname must match a zpool that exists on the
+# node; volumeBindingMode is Immediate on purpose — the engine's PVCs have no
+# consumer pod at provisioning time, so WaitForFirstConsumer would hold every
+# clone at Pending forever.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: branch-clone
+provisioner: zfs.csi.openebs.io
+volumeBindingMode: Immediate
+parameters:
+  poolname: zfspv-pool
+  fstype: zfs
+---
+# VolumeSnapshotClass used for the engine's per-branch snapshot objects.
+# deletionPolicy Delete applies to dynamically provisioned snapshots (like
+# the seed snapshot below); the engine's own pre-provisioned contents are
+# created with Retain explicitly.
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: branch-snap
+driver: zfs.csi.openebs.io
+deletionPolicy: Delete
