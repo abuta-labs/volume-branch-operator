@@ -1,0 +1,107 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: branchsources.volumes.arbit-tech.com
+spec:
+  group: volumes.arbit-tech.com
+  names:
+    kind: BranchSource
+    listKind: BranchSourceList
+    plural: branchsources
+    singular: branchsource
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.sizeBytes
+      name: Size
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: BranchSource is a named, immutable snapshot to branch volumes
+          from.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BranchSourceSpec defines an immutable snapshot handle to
+              branch from.
+            properties:
+              cloneStorageClassName:
+                description: |-
+                  cloneStorageClassName is the StorageClass used for PVCs cloned from
+                  this source.
+                minLength: 1
+                type: string
+              csiDriver:
+                description: |-
+                  csiDriver is the CSI driver name the snapshot handle belongs to
+                  (e.g. fsx.openzfs.csi.aws.com, zfs.csi.openebs.io).
+                minLength: 1
+                type: string
+              snapshotHandle:
+                description: |-
+                  snapshotHandle is the CSI snapshot handle (driver-specific id) of the
+                  immutable source snapshot. Set once; the source is immutable.
+                minLength: 1
+                type: string
+              volumeSnapshotClassName:
+                description: |-
+                  volumeSnapshotClassName is the VolumeSnapshotClass used when
+                  materializing per-branch VolumeSnapshotContent/VolumeSnapshot pairs.
+                minLength: 1
+                type: string
+            required:
+            - cloneStorageClassName
+            - csiDriver
+            - snapshotHandle
+            - volumeSnapshotClassName
+            type: object
+          status:
+            description: BranchSourceStatus defines the observed state of BranchSource.
+            properties:
+              message:
+                description: message carries a human-readable reason for Invalid.
+                type: string
+              phase:
+                description: phase is the validation state of the source.
+                enum:
+                - Pending
+                - Ready
+                - Invalid
+                type: string
+              sizeBytes:
+                description: sizeBytes is the logical size of the source snapshot,
+                  when known.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

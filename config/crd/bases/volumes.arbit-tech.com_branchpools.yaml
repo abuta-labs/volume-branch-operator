@@ -1,0 +1,105 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: branchpools.volumes.arbit-tech.com
+spec:
+  group: volumes.arbit-tech.com
+  names:
+    kind: BranchPool
+    listKind: BranchPoolList
+    plural: branchpools
+    singular: branchpool
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.source
+      name: Source
+      type: string
+    - jsonPath: .status.warm
+      name: Warm
+      type: integer
+    - jsonPath: .spec.targetWarm
+      name: Target
+      type: integer
+    - jsonPath: .status.warming
+      name: Warming
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          BranchPool keeps N pre-warmed clones of a BranchSource so a Branch claim
+          is a label flip instead of a CreateVolume call.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BranchPoolSpec defines a warm set of pre-cloned volumes against
+              a source.
+            properties:
+              maxWarming:
+                description: |-
+                  maxWarming caps concurrent clone creations. Unset means the substrate
+                  profile default (backends like FSx serialize CreateVolume and need a
+                  low cap; fast-clone backends can go high).
+                format: int32
+                minimum: 1
+                type: integer
+              source:
+                description: source is the name of the BranchSource this pool pre-clones.
+                minLength: 1
+                type: string
+              targetWarm:
+                description: |-
+                  targetWarm is the number of ready-to-claim clones to keep warm.
+                  Backends with fast clones may want 0 (claim on demand is cheap there).
+                format: int32
+                minimum: 0
+                type: integer
+            required:
+            - source
+            - targetWarm
+            type: object
+          status:
+            description: BranchPoolStatus defines the observed state of BranchPool.
+            properties:
+              claimedTotal:
+                description: claimedTotal counts claims served from this pool over
+                  its lifetime.
+                format: int64
+                type: integer
+              warm:
+                description: warm is the number of ready, unclaimed clones.
+                format: int32
+                type: integer
+              warming:
+                description: warming is the number of clones currently being created.
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
