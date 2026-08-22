@@ -21,6 +21,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/rand"
@@ -32,6 +33,7 @@ import (
 
 	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
 	"github.com/arbit-tech/volume-branch-operator/internal/pool"
+	"github.com/arbit-tech/volume-branch-operator/internal/profile"
 )
 
 // BranchPoolFinalizer gates pool deletion on ordered teardown of its warm
@@ -102,8 +104,19 @@ func (r *BranchPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Replenish: bring warm+warming up to targetWarm, without ever exceeding
-	// maxWarming concurrent creations.
-	maxWarming := pool.MaxWarmingDefault
+	// maxWarming concurrent creations. Unset maxWarming resolves from the
+	// source's substrate profile — backends that serialize CreateVolume get
+	// a low cap, fast-clone backends a wide one.
+	prof := profile.Resolve(&src)
+	if prof.NeedsSize() && src.Status.SizeBytes == 0 {
+		// Same rule as the Branch path: actual-mode sizing must not guess.
+		// The source's probe is discovering the size; warm once it lands.
+		if _, _, err := r.inventory(ctx, bp.Spec.Source); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	maxWarming := prof.MaxWarmingDefault
 	if bp.Spec.MaxWarming != nil {
 		maxWarming = *bp.Spec.MaxWarming
 	}
@@ -111,7 +124,7 @@ func (r *BranchPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	budget := maxWarming - warming
 	toCreate := min(need, budget)
 	for range toCreate {
-		if err := r.createWarmClone(ctx, &bp, &src); err != nil {
+		if err := r.createWarmClone(ctx, &bp, &src, prof.SizeRequest(src.Status.SizeBytes)); err != nil {
 			return ctrl.Result{}, err
 		}
 		warming++
@@ -153,8 +166,8 @@ func (r *BranchPoolReconciler) inventory(ctx context.Context, source string) (wa
 	return
 }
 
-func (r *BranchPoolReconciler) createWarmClone(ctx context.Context, bp *volumesv1alpha1.BranchPool, src *volumesv1alpha1.BranchSource) error {
-	set := pool.BuildWarmSet(bp, src, randCloneID())
+func (r *BranchPoolReconciler) createWarmClone(ctx context.Context, bp *volumesv1alpha1.BranchPool, src *volumesv1alpha1.BranchSource, size resource.Quantity) error {
+	set := pool.BuildWarmSet(bp, src, randCloneID(), size)
 	if err := r.Create(ctx, set.VSC); client.IgnoreAlreadyExists(err) != nil {
 		return err
 	}

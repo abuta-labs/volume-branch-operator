@@ -106,6 +106,8 @@ func readySourceWithSC(ctx context.Context) (string, string) {
 	name := uniqueName("src")
 	Expect(k8sClient.Create(ctx, newSource(name, sc, vsc))).To(Succeed())
 	reconcileSource(ctx, name)
+	fillProbeRestoreSize(ctx, name, 1<<30)
+	reconcileSource(ctx, name)
 	return name, sc
 }
 

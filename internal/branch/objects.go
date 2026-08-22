@@ -37,17 +37,6 @@ const (
 	BranchLabel = "volumes.arbit-tech.com/branch"
 )
 
-// CloneSizeRequest is the capacity request stamped on every clone PVC.
-//
-// It defaults to a 1Gi sentinel: on backends whose CSI driver ignores the
-// requested size for snapshot-sourced clones (FSx for OpenZFS clones are
-// always full-size views of their parent), the request is a placeholder the
-// driver never honors, and asking for the real size would needlessly fail
-// quota checks. Backends that DO honor the request need the actual source
-// size here — that policy (sentinel vs actual) belongs to the substrate
-// profile; this var is the seam it will take over.
-var CloneSizeRequest = resource.MustParse("1Gi")
-
 // VSCName is the per-branch VolumeSnapshotContent name. UID-keyed: the
 // object is cluster-scoped, so the name must be globally unique even across
 // same-named Branches in different namespaces.
@@ -112,8 +101,10 @@ func BuildVS(b *volumesv1alpha1.Branch, src *volumesv1alpha1.BranchSource) *snap
 }
 
 // BuildPVC returns the clone PVC: the consumer-named claim, in the Branch's
-// namespace, provisioned from the per-branch VolumeSnapshot.
-func BuildPVC(b *volumesv1alpha1.Branch, src *volumesv1alpha1.BranchSource) *corev1.PersistentVolumeClaim {
+// namespace, provisioned from the per-branch VolumeSnapshot. size is the
+// capacity request, computed by the source's substrate profile (sentinel
+// placeholder vs the source's actual size).
+func BuildPVC(b *volumesv1alpha1.Branch, src *volumesv1alpha1.BranchSource, size resource.Quantity) *corev1.PersistentVolumeClaim {
 	apiGroup := snapv1.GroupName
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -131,7 +122,7 @@ func BuildPVC(b *volumesv1alpha1.Branch, src *volumesv1alpha1.BranchSource) *cor
 			},
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: CloneSizeRequest,
+					corev1.ResourceStorage: size,
 				},
 			},
 		},

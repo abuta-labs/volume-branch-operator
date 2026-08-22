@@ -22,8 +22,11 @@ package e2e
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -96,9 +99,15 @@ func branchPhase(name string) string {
 }
 
 var _ = Describe("volume branching on ZFS-LocalPV", Ordered, func() {
-	var snapshotHandle string
+	var snapshotHandle, restoreSize string
 
 	BeforeAll(func() {
+		// A prior failed run leaves its cluster (and cluster-scoped engine
+		// objects) behind for post-mortem; this suite must not inherit them —
+		// a leftover warm pool would serve claims meant to test on-demand.
+		_, _ = kubectl("delete", "branchpool", "--all", "--wait=true", "--timeout=120s")
+		_, _ = kubectl("delete", "branchsource", "--all", "--wait=true", "--timeout=120s")
+		_, _ = kubectl("delete", "namespace", ns, "--ignore-not-found", "--wait=true", "--timeout=120s")
 		mustKubectl("create", "namespace", ns)
 	})
 
@@ -118,7 +127,7 @@ spec:
   storageClassName: %s
   resources:
     requests:
-      storage: 1Gi
+      storage: 1200Mi
 `, seedPVC, ns, scName))
 		runPod("seed-writer", seedPVC, fmt.Sprintf("echo %s > /data/seed.txt && sync", seedData))
 	})
@@ -146,6 +155,9 @@ spec:
 		snapshotHandle = mustKubectl("get", "volumesnapshotcontent", bound,
 			"-o", "jsonpath={.status.snapshotHandle}")
 		Expect(snapshotHandle).NotTo(BeEmpty())
+		restoreSize = strings.TrimSpace(mustKubectl("get", "volumesnapshotcontent", bound,
+			"-o", "jsonpath={.status.restoreSize}"))
+		Expect(restoreSize).NotTo(BeEmpty())
 	})
 
 	It("takes a BranchSource to Ready", func() {
@@ -164,6 +176,10 @@ spec:
 			out, _ := kubectl("get", "branchsource", "e2e-source", "-o", "jsonpath={.status.phase}")
 			return out
 		}, 2*time.Minute, 3*time.Second).Should(Equal("Ready"))
+
+		// The zfs-localpv builtin profile resolves to actual sizing.
+		Expect(mustKubectl("get", "branchsource", "e2e-source",
+			"-o", "jsonpath={.status.resolvedProfile.cloneSizeMode}")).To(Equal("actual"))
 	})
 
 	It("branches to a Bound PVC carrying the seed data", func() {
@@ -186,6 +202,21 @@ spec:
 
 		logs := runPod("branch-reader", branchPVC, "cat /data/seed.txt")
 		Expect(strings.TrimSpace(logs)).To(Equal(seedData))
+	})
+
+	It("discovers the source size from the originating snapshot content", func() {
+		// The source starts with only a snapshot handle — no size. The
+		// engine finds the dynamically provisioned VolumeSnapshotContent
+		// with the matching handle and reads its restoreSize; actual-mode
+		// sizing keys off it from then on.
+		wantQ := resource.MustParse(restoreSize)
+		want := wantQ.Value()
+		Eventually(func() int64 {
+			out, _ := kubectl("get", "branchsource", "e2e-source", "-o", "jsonpath={.status.sizeBytes}")
+			got, _ := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+			return got
+		}, 2*time.Minute, 3*time.Second).Should(Equal(want),
+			"source size never discovered from the originating VSC restoreSize")
 	})
 
 	It("isolates branch writes from the seed (CoW)", func() {
@@ -260,6 +291,14 @@ spec:
 			"-l", "volumes.arbit-tech.com/pool-state=warm",
 			"-o", "jsonpath={.items[0].spec.volumeName}"))
 		Expect(warmPV).NotTo(BeEmpty())
+		// Compare as quantities: the PVC request canonicalizes ("2Gi") while
+		// restoreSize is captured in raw bytes ("2147483648").
+		warmReq := resource.MustParse(mustKubectl("-n", "branch-pool", "get", "pvc",
+			"-l", "volumes.arbit-tech.com/pool-state=warm",
+			"-o", "jsonpath={.items[0].spec.resources.requests.storage}"))
+		wantWarm := resource.MustParse(restoreSize)
+		Expect(warmReq.Value()).To(Equal(wantWarm.Value()),
+			"warm clones must be actual-sized from the discovered source size")
 
 		kubectlApply(fmt.Sprintf(`
 apiVersion: volumes.arbit-tech.com/v1alpha1

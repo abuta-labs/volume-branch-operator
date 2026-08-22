@@ -44,7 +44,34 @@ func readySource(ctx context.Context) string {
 	name := uniqueName("src")
 	Expect(k8sClient.Create(ctx, newSource(name, sc, vsc))).To(Succeed())
 	reconcileSource(ctx, name)
+	fillProbeRestoreSize(ctx, name, 1<<30)
+	reconcileSource(ctx, name) // pick the discovered size up into status
 	return name
+}
+
+// fillProbeRestoreSize plays the originating snapshot content: in a real
+// cluster the dynamically provisioned VolumeSnapshotContent that cut the
+// snapshot carries snapshotHandle + restoreSize; envtest has neither a
+// sidecar nor an original, so one is faked for the discovery scan to find.
+func fillProbeRestoreSize(ctx context.Context, srcName string, size int64) {
+	handle := "snap-" + srcName // newSource's handle convention
+	vscName := "orig-" + srcName
+	className := "any"
+	vsc := &snapv1.VolumeSnapshotContent{
+		ObjectMeta: metav1.ObjectMeta{Name: vscName},
+		Spec: snapv1.VolumeSnapshotContentSpec{
+			DeletionPolicy:          snapv1.VolumeSnapshotContentRetain,
+			Driver:                  testDriver,
+			Source:                  snapv1.VolumeSnapshotContentSource{SnapshotHandle: &handle},
+			VolumeSnapshotClassName: &className,
+			VolumeSnapshotRef: corev1.ObjectReference{
+				Name: "orig-vs-" + srcName, Namespace: "default",
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, vsc)).To(Succeed())
+	vsc.Status = &snapv1.VolumeSnapshotContentStatus{SnapshotHandle: &handle, RestoreSize: &size}
+	Expect(k8sClient.Status().Update(ctx, vsc)).To(Succeed())
 }
 
 func reconcileBranch(ctx context.Context, key types.NamespacedName, times int) {

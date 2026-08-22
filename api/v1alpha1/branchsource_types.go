@@ -17,8 +17,63 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// CloneSizeMode selects how clone PVC capacity requests are computed.
+// +kubebuilder:validation:Enum=sentinel;actual
+type CloneSizeMode string
+
+const (
+	// CloneSizeModeSentinel requests a small fixed placeholder. For drivers
+	// whose snapshot-sourced clones are always full-size views of their
+	// parent, the request is never honored, and asking for the real size
+	// would only trip quota checks.
+	CloneSizeModeSentinel CloneSizeMode = "sentinel"
+	// CloneSizeModeActual requests the source's real size (rounded up).
+	// Required on drivers that enforce request >= the snapshot's restore
+	// size.
+	CloneSizeModeActual CloneSizeMode = "actual"
+)
+
+// ProfileOverrides is a per-source override of the built-in substrate
+// profile for its CSI driver. Every field is optional; unset fields keep the
+// built-in value. The effective result is published in
+// status.resolvedProfile.
+type ProfileOverrides struct {
+	// snapshotPinsVolume declares that on this backend a snapshot pins its
+	// parent volume, so teardown must remove volume objects before snapshot
+	// objects.
+	// +optional
+	SnapshotPinsVolume *bool `json:"snapshotPinsVolume,omitempty"`
+
+	// cloneSizeMode selects sentinel or actual clone sizing.
+	// +optional
+	CloneSizeMode *CloneSizeMode `json:"cloneSizeMode,omitempty"`
+
+	// cloneSizeSentinel is the placeholder capacity requested in sentinel
+	// mode (and the fallback in actual mode while the source size is still
+	// unknown).
+	// +optional
+	CloneSizeSentinel *resource.Quantity `json:"cloneSizeSentinel,omitempty"`
+
+	// maxWarmingDefault caps concurrent warm-clone creations for pools of
+	// this source when BranchPool.spec.maxWarming is unset.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MaxWarmingDefault *int32 `json:"maxWarmingDefault,omitempty"`
+}
+
+// ResolvedProfile is the effective substrate profile for a source:
+// the built-in profile for its CSI driver with spec.profile overrides
+// applied.
+type ResolvedProfile struct {
+	SnapshotPinsVolume bool          `json:"snapshotPinsVolume"`
+	CloneSizeMode      CloneSizeMode `json:"cloneSizeMode"`
+	CloneSizeSentinel  string        `json:"cloneSizeSentinel"`
+	MaxWarmingDefault  int32         `json:"maxWarmingDefault"`
+}
 
 // BranchSourceSpec defines an immutable snapshot handle to branch from.
 type BranchSourceSpec struct {
@@ -41,6 +96,19 @@ type BranchSourceSpec struct {
 	// materializing per-branch VolumeSnapshotContent/VolumeSnapshot pairs.
 	// +kubebuilder:validation:MinLength=1
 	VolumeSnapshotClassName string `json:"volumeSnapshotClassName"`
+
+	// profile overrides the built-in substrate profile for spec.csiDriver.
+	// +optional
+	Profile *ProfileOverrides `json:"profile,omitempty"`
+
+	// sizeBytes declares the snapshot's logical size. Optional: normally the
+	// engine discovers it from a VolumeSnapshotContent whose snapshotHandle
+	// matches (the snapshot's originating content carries restoreSize).
+	// Declare it when that content no longer exists — actual-mode sizing
+	// cannot proceed with an unknown size.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	SizeBytes int64 `json:"sizeBytes,omitempty"`
 }
 
 // BranchSourcePhase is the validation state of a BranchSource.
@@ -66,6 +134,11 @@ type BranchSourceStatus struct {
 	// message carries a human-readable reason for Invalid.
 	// +optional
 	Message string `json:"message,omitempty"`
+
+	// resolvedProfile is the effective substrate profile: the built-in
+	// profile for spec.csiDriver with spec.profile overrides applied.
+	// +optional
+	ResolvedProfile *ResolvedProfile `json:"resolvedProfile,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -73,6 +146,7 @@ type BranchSourceStatus struct {
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Size",type=integer,JSONPath=`.status.sizeBytes`
+// +kubebuilder:printcolumn:name="Sizing",type=string,JSONPath=`.status.resolvedProfile.cloneSizeMode`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // BranchSource is a named, immutable snapshot to branch volumes from.
