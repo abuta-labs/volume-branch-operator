@@ -1,0 +1,23 @@
+# e2e storage classes for OpenEBS ZFS-LocalPV. POOLNAME is substituted by
+# hack/e2e-up.sh.
+#
+# volumeBindingMode is Immediate on purpose: engine-produced clone PVCs have
+# no pod at creation time, and Branch declares Ready on PVC Bound —
+# WaitForFirstConsumer would hold every branch at Cloning until a consumer
+# pod appears.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: vbo-e2e-zfs
+provisioner: zfs.csi.openebs.io
+volumeBindingMode: Immediate
+parameters:
+  poolname: "POOLNAME"
+  fstype: "zfs"
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: vbo-e2e-zfs-snap
+driver: zfs.csi.openebs.io
+deletionPolicy: Delete

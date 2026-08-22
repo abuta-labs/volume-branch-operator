@@ -20,11 +20,9 @@ limitations under the License.
 package e2e
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -33,307 +31,222 @@ import (
 	"github.com/arbit-tech/volume-branch-operator/test/utils"
 )
 
-// namespace where the project is deployed in
-const namespace = "volume-branch-operator-system"
+const (
+	ns          = "vbo-e2e-app"
+	scName      = "vbo-e2e-zfs"
+	vscName     = "vbo-e2e-zfs-snap"
+	seedPVC     = "seed-pvc"
+	seedData    = "vbo-seed-1815"
+	branchPVC   = "branch-pvc"
+	branchWrite = "vbo-branch-write"
+)
 
-// serviceAccountName created for the project
-const serviceAccountName = "volume-branch-operator-controller-manager"
+func kubectl(args ...string) (string, error) {
+	return utils.Run(exec.Command("kubectl", args...))
+}
 
-// metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "volume-branch-operator-controller-manager-metrics-service"
+func mustKubectl(args ...string) string {
+	out, err := kubectl(args...)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "kubectl %s\n%s", strings.Join(args, " "), out)
+	return out
+}
 
-// metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "volume-branch-operator-metrics-binding"
+func kubectlApply(manifest string) {
+	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(manifest)
+	out, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "apply failed: %s\n%s", manifest, out)
+}
 
-var _ = Describe("Manager", Ordered, func() {
-	var controllerPodName string
+// runPod runs a one-shot pod against a PVC and waits for it to succeed.
+// The pod is deleted afterwards so it never blocks PVC deletion.
+func runPod(name, pvc, command string) string {
+	kubectlApply(fmt.Sprintf(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  restartPolicy: Never
+  containers:
+  - name: main
+    image: busybox:1.36
+    command: ["sh", "-c", %q]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: %s
+`, name, ns, command, pvc))
+	EventuallyWithOffset(1, func() string {
+		out, _ := kubectl("-n", ns, "get", "pod", name, "-o", "jsonpath={.status.phase}")
+		return out
+	}, 3*time.Minute, 5*time.Second).Should(Equal("Succeeded"), "pod %s did not succeed", name)
+	logs := mustKubectl("-n", ns, "logs", name)
+	mustKubectl("-n", ns, "delete", "pod", name, "--wait=true")
+	return logs
+}
 
-	// Before running the tests, set up the environment by creating the namespace,
-	// enforce the restricted security policy to the namespace, installing CRDs,
-	// and deploying the controller.
+func branchPhase(name string) string {
+	out, _ := kubectl("-n", ns, "get", "branch", name, "-o", "jsonpath={.status.phase}")
+	return out
+}
+
+var _ = Describe("volume branching on ZFS-LocalPV", Ordered, func() {
+	var snapshotHandle string
+
 	BeforeAll(func() {
-		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
-
-		By("labeling the namespace to enforce the restricted security policy")
-		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
-			"pod-security.kubernetes.io/enforce=restricted")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
-
-		By("installing CRDs")
-		cmd = exec.Command("make", "install")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
-
-		By("deploying the controller-manager")
-		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage))
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+		mustKubectl("create", "namespace", ns)
 	})
 
-	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
-	// and deleting the namespace.
 	AfterAll(func() {
-		By("cleaning up the curl pod for metrics")
-		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
-		_, _ = utils.Run(cmd)
-
-		By("undeploying the controller-manager")
-		cmd = exec.Command("make", "undeploy")
-		_, _ = utils.Run(cmd)
-
-		By("uninstalling CRDs")
-		cmd = exec.Command("make", "uninstall")
-		_, _ = utils.Run(cmd)
-
-		By("removing manager namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", namespace)
-		_, _ = utils.Run(cmd)
+		_, _ = kubectl("delete", "namespace", ns, "--wait=false")
 	})
 
-	// After each test, check for failures and collect logs, events,
-	// and pod descriptions for debugging.
-	AfterEach(func() {
-		specReport := CurrentSpecReport()
-		if specReport.Failed() {
-			By("Fetching controller manager pod logs")
-			cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
-			controllerLogs, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs:\n %s", controllerLogs)
-			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %s", err)
-			}
-
-			By("Fetching Kubernetes events")
-			cmd = exec.Command("kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
-			eventsOutput, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events:\n%s", eventsOutput)
-			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Kubernetes events: %s", err)
-			}
-
-			By("Fetching curl-metrics logs")
-			cmd = exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace)
-			metricsOutput, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Metrics logs:\n %s", metricsOutput)
-			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get curl-metrics logs: %s", err)
-			}
-
-			By("Fetching controller manager pod description")
-			cmd = exec.Command("kubectl", "describe", "pod", controllerPodName, "-n", namespace)
-			podDescription, err := utils.Run(cmd)
-			if err == nil {
-				fmt.Println("Pod description:\n", podDescription)
-			} else {
-				fmt.Println("Failed to describe controller pod")
-			}
-		}
+	It("seeds a PVC with data", func() {
+		kubectlApply(fmt.Sprintf(`
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: %s
+  resources:
+    requests:
+      storage: 1Gi
+`, seedPVC, ns, scName))
+		runPod("seed-writer", seedPVC, fmt.Sprintf("echo %s > /data/seed.txt && sync", seedData))
 	})
 
-	SetDefaultEventuallyTimeout(2 * time.Minute)
-	SetDefaultEventuallyPollingInterval(time.Second)
+	It("snapshots the seed and extracts the snapshot handle", func() {
+		kubectlApply(fmt.Sprintf(`
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: seed-snap
+  namespace: %s
+spec:
+  volumeSnapshotClassName: %s
+  source:
+    persistentVolumeClaimName: %s
+`, ns, vscName, seedPVC))
+		Eventually(func() string {
+			out, _ := kubectl("-n", ns, "get", "volumesnapshot", "seed-snap",
+				"-o", "jsonpath={.status.readyToUse}")
+			return out
+		}, 3*time.Minute, 5*time.Second).Should(Equal("true"))
 
-	Context("Manager", func() {
-		It("should run successfully", func() {
-			By("validating that the controller-manager pod is running as expected")
-			verifyControllerUp := func(g Gomega) {
-				// Get the name of the controller-manager pod
-				cmd := exec.Command("kubectl", "get",
-					"pods", "-l", "control-plane=controller-manager",
-					"-o", "go-template={{ range .items }}"+
-						"{{ if not .metadata.deletionTimestamp }}"+
-						"{{ .metadata.name }}"+
-						"{{ \"\\n\" }}{{ end }}{{ end }}",
-					"-n", namespace,
-				)
+		bound := mustKubectl("-n", ns, "get", "volumesnapshot", "seed-snap",
+			"-o", "jsonpath={.status.boundVolumeSnapshotContentName}")
+		snapshotHandle = mustKubectl("get", "volumesnapshotcontent", bound,
+			"-o", "jsonpath={.status.snapshotHandle}")
+		Expect(snapshotHandle).NotTo(BeEmpty())
+	})
 
-				podOutput, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred(), "Failed to retrieve controller-manager pod information")
-				podNames := utils.GetNonEmptyLines(podOutput)
-				g.Expect(podNames).To(HaveLen(1), "expected 1 controller pod running")
-				controllerPodName = podNames[0]
-				g.Expect(controllerPodName).To(ContainSubstring("controller-manager"))
+	It("takes a BranchSource to Ready", func() {
+		kubectlApply(fmt.Sprintf(`
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: BranchSource
+metadata:
+  name: e2e-source
+spec:
+  snapshotHandle: %q
+  csiDriver: zfs.csi.openebs.io
+  cloneStorageClassName: %s
+  volumeSnapshotClassName: %s
+`, snapshotHandle, scName, vscName))
+		Eventually(func() string {
+			out, _ := kubectl("get", "branchsource", "e2e-source", "-o", "jsonpath={.status.phase}")
+			return out
+		}, 2*time.Minute, 3*time.Second).Should(Equal("Ready"))
+	})
 
-				// Validate the pod's status
-				cmd = exec.Command("kubectl", "get",
-					"pods", controllerPodName, "-o", "jsonpath={.status.phase}",
-					"-n", namespace,
-				)
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Running"), "Incorrect controller-manager pod status")
-			}
-			Eventually(verifyControllerUp).Should(Succeed())
-		})
+	It("branches to a Bound PVC carrying the seed data", func() {
+		kubectlApply(fmt.Sprintf(`
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: Branch
+metadata:
+  name: br1
+  namespace: %s
+spec:
+  source: e2e-source
+  pvcName: %s
+`, ns, branchPVC))
+		Eventually(func() string { return branchPhase("br1") },
+			4*time.Minute, 5*time.Second).Should(Equal("Ready"))
+		Expect(mustKubectl("-n", ns, "get", "pvc", branchPVC,
+			"-o", "jsonpath={.status.phase}")).To(Equal("Bound"))
+		Expect(mustKubectl("-n", ns, "get", "branch", "br1",
+			"-o", "jsonpath={.status.provisioning}")).To(Equal("ondemand"))
 
-		It("should ensure the metrics endpoint is serving metrics", func() {
-			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
-			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
-				"--clusterrole=volume-branch-operator-metrics-reader",
-				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
-			)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
+		logs := runPod("branch-reader", branchPVC, "cat /data/seed.txt")
+		Expect(strings.TrimSpace(logs)).To(Equal(seedData))
+	})
 
-			By("validating that the metrics service is available")
-			cmd = exec.Command("kubectl", "get", "service", metricsServiceName, "-n", namespace)
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Metrics service should exist")
+	It("isolates branch writes from the seed (CoW)", func() {
+		runPod("branch-writer", branchPVC,
+			fmt.Sprintf("echo %s > /data/branch.txt && sync", branchWrite))
+		// The seed volume must not see the branch's write.
+		logs := runPod("seed-reader", seedPVC,
+			"ls /data; test ! -e /data/branch.txt && cat /data/seed.txt")
+		Expect(logs).To(ContainSubstring(seedData))
+		Expect(logs).NotTo(ContainSubstring("branch.txt"))
+	})
 
-			By("getting the service account token")
-			token, err := serviceAccountToken()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(token).NotTo(BeEmpty())
+	It("resets the branch back to the source state", func() {
+		mustKubectl("-n", ns, "patch", "branch", "br1", "--type=merge",
+			"-p", `{"spec":{"resetToken":"r1"}}`)
+		// Phase drops out of Ready, then returns once the re-clone binds.
+		Eventually(func() string { return branchPhase("br1") },
+			2*time.Minute, 2*time.Second).ShouldNot(Equal("Ready"))
+		Eventually(func() string { return branchPhase("br1") },
+			4*time.Minute, 5*time.Second).Should(Equal("Ready"))
+		Expect(mustKubectl("-n", ns, "get", "branch", "br1",
+			"-o", "jsonpath={.status.observedResetToken}")).To(Equal("r1"))
 
-			By("ensuring the controller pod is ready")
-			verifyControllerPodReady := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pod", controllerPodName, "-n", namespace,
-					"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("True"), "Controller pod not ready")
-			}
-			Eventually(verifyControllerPodReady, 3*time.Minute, time.Second).Should(Succeed())
+		logs := runPod("reset-reader", branchPVC,
+			"ls /data; test ! -e /data/branch.txt && cat /data/seed.txt")
+		Expect(logs).To(ContainSubstring(seedData))
+		Expect(logs).NotTo(ContainSubstring("branch.txt"))
+	})
 
-			By("verifying that the controller manager is serving the metrics server")
-			verifyMetricsServerStarted := func(g Gomega) {
-				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(ContainSubstring("Serving metrics server"),
-					"Metrics server not yet started")
-			}
-			Eventually(verifyMetricsServerStarted, 3*time.Minute, time.Second).Should(Succeed())
+	It("reaps a TTL branch", func() {
+		kubectlApply(fmt.Sprintf(`
+apiVersion: volumes.arbit-tech.com/v1alpha1
+kind: Branch
+metadata:
+  name: br-ttl
+  namespace: %s
+spec:
+  source: e2e-source
+  pvcName: ttl-pvc
+  ttl: 30s
+`, ns))
+		Eventually(func() string { return branchPhase("br-ttl") },
+			4*time.Minute, 5*time.Second).Should(Equal("Ready"))
+		Eventually(func() string {
+			out, _ := kubectl("-n", ns, "get", "branch", "br-ttl", "--ignore-not-found", "-o", "name")
+			return strings.TrimSpace(out)
+		}, 3*time.Minute, 5*time.Second).Should(BeEmpty(), "TTL branch was never reaped")
+		Eventually(func() string {
+			out, _ := kubectl("-n", ns, "get", "pvc", "ttl-pvc", "--ignore-not-found", "-o", "name")
+			return strings.TrimSpace(out)
+		}, 2*time.Minute, 5*time.Second).Should(BeEmpty(), "TTL branch PVC leaked")
+	})
 
-			// +kubebuilder:scaffold:e2e-metrics-webhooks-readiness
+	It("tears everything down without leaks", func() {
+		mustKubectl("-n", ns, "delete", "branch", "br1", "--wait=true", "--timeout=180s")
+		Expect(mustKubectl("-n", ns, "get", "pvc", "-o", "name")).NotTo(ContainSubstring(branchPVC))
 
-			By("creating the curl-metrics pod to access the metrics endpoint")
-			cmd = exec.Command("kubectl", "run", "curl-metrics", "--restart=Never",
-				"--namespace", namespace,
-				"--image=curlimages/curl:latest",
-				"--overrides",
-				fmt.Sprintf(`{
-					"spec": {
-						"containers": [{
-							"name": "curl",
-							"image": "curlimages/curl:latest",
-							"command": ["/bin/sh", "-c"],
-							"args": [
-								"for i in $(seq 1 30); do curl -v -k -H 'Authorization: Bearer %s' https://%s.%s.svc.cluster.local:8443/metrics && exit 0 || sleep 2; done; exit 1"
-							],
-							"securityContext": {
-								"readOnlyRootFilesystem": true,
-								"allowPrivilegeEscalation": false,
-								"capabilities": {
-									"drop": ["ALL"]
-								},
-								"runAsNonRoot": true,
-								"runAsUser": 1000,
-								"seccompProfile": {
-									"type": "RuntimeDefault"
-								}
-							}
-						}],
-						"serviceAccountName": "%s"
-					}
-				}`, token, metricsServiceName, namespace, serviceAccountName))
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create curl-metrics pod")
-
-			By("waiting for the curl-metrics pod to complete.")
-			verifyCurlUp := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pods", "curl-metrics",
-					"-o", "jsonpath={.status.phase}",
-					"-n", namespace)
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Succeeded"), "curl pod in wrong status")
-			}
-			Eventually(verifyCurlUp, 5*time.Minute).Should(Succeed())
-
-			By("getting the metrics by checking curl-metrics logs")
-			verifyMetricsAvailable := func(g Gomega) {
-				metricsOutput, err := getMetricsOutput()
-				g.Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-				g.Expect(metricsOutput).NotTo(BeEmpty())
-				g.Expect(metricsOutput).To(ContainSubstring("< HTTP/1.1 200 OK"))
-			}
-			Eventually(verifyMetricsAvailable, 2*time.Minute).Should(Succeed())
-		})
-
-		// +kubebuilder:scaffold:e2e-webhooks-checks
-
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput, err := getMetricsOutput()
-		// Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+		mustKubectl("delete", "branchsource", "e2e-source", "--wait=true", "--timeout=180s")
+		// No engine-labeled objects may survive source teardown.
+		out := mustKubectl("get", "volumesnapshotcontent",
+			"-l", "volumes.arbit-tech.com/source", "-o", "name")
+		Expect(strings.TrimSpace(out)).To(BeEmpty(), "leaked VSCs: %s", out)
 	})
 })
-
-// serviceAccountToken returns a token for the specified service account in the given namespace.
-// It uses the Kubernetes TokenRequest API to generate a token by directly sending a request
-// and parsing the resulting token from the API response.
-func serviceAccountToken() (string, error) {
-	const tokenRequestRawString = `{
-		"apiVersion": "authentication.k8s.io/v1",
-		"kind": "TokenRequest"
-	}`
-
-	// Temporary file to store the token request
-	secretName := fmt.Sprintf("%s-token-request", serviceAccountName)
-	tokenRequestFile := filepath.Join("/tmp", secretName)
-	err := os.WriteFile(tokenRequestFile, []byte(tokenRequestRawString), os.FileMode(0o644))
-	if err != nil {
-		return "", err
-	}
-
-	var out string
-	verifyTokenCreation := func(g Gomega) {
-		// Execute kubectl command to create the token
-		cmd := exec.Command("kubectl", "create", "--raw", fmt.Sprintf(
-			"/api/v1/namespaces/%s/serviceaccounts/%s/token",
-			namespace,
-			serviceAccountName,
-		), "-f", tokenRequestFile)
-
-		output, err := cmd.CombinedOutput()
-		g.Expect(err).NotTo(HaveOccurred())
-
-		// Parse the JSON output to extract the token
-		var token tokenRequest
-		err = json.Unmarshal(output, &token)
-		g.Expect(err).NotTo(HaveOccurred())
-
-		out = token.Status.Token
-	}
-	Eventually(verifyTokenCreation).Should(Succeed())
-
-	return out, err
-}
-
-// getMetricsOutput retrieves and returns the logs from the curl pod used to access the metrics endpoint.
-func getMetricsOutput() (string, error) {
-	By("getting the curl-metrics logs")
-	cmd := exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace)
-	return utils.Run(cmd)
-}
-
-// tokenRequest is a simplified representation of the Kubernetes TokenRequest API response,
-// containing only the token field that we need to extract.
-type tokenRequest struct {
-	Status struct {
-		Token string `json:"token"`
-	} `json:"status"`
-}

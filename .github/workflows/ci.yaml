@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Unit + envtest
+        run: make test
+      - name: Generated files are committed
+        run: |
+          make manifests generate fmt
+          git diff --exit-code
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Load the zfs kernel module
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zfsutils-linux
+          sudo modprobe zfs
+          cat /sys/module/zfs/version
+      - name: Install kind
+        run: |
+          sudo curl -sLo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          sudo chmod +x /usr/local/bin/kind
+          kind version
+      - name: e2e (kind + ZFS-LocalPV)
+        run: make test-e2e

@@ -21,7 +21,6 @@ package e2e
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"testing"
 
@@ -31,20 +30,14 @@ import (
 	"github.com/arbit-tech/volume-branch-operator/test/utils"
 )
 
-var (
-	// managerImage is the manager image to be built and loaded for testing.
-	managerImage = "example.com/volume-branch-operator:v0.0.1"
-	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
-	shouldCleanupCertManager = false
-)
+// managerImage is built locally and side-loaded into kind — never pulled.
+var managerImage = "example.com/volume-branch-operator:e2e"
 
-// TestE2E runs the e2e test suite to validate the solution in an isolated environment.
-// The default setup requires Kind and CertManager.
-//
-// To skip CertManager installation, set: CERT_MANAGER_INSTALL_SKIP=true
+// TestE2E validates the full branch lifecycle against a real CSI driver
+// (OpenEBS ZFS-LocalPV) in the kind cluster prepared by hack/e2e-up.sh.
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	_, _ = fmt.Fprintf(GinkgoWriter, "Starting volume-branch-operator e2e test suite\n")
+	_, _ = fmt.Fprintf(GinkgoWriter, "Starting volume-branch-operator e2e suite\n")
 	RunSpecs(t, "e2e suite")
 }
 
@@ -52,50 +45,22 @@ var _ = BeforeSuite(func() {
 	By("building the manager image")
 	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage))
 	_, err := utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager image")
+	Expect(err).NotTo(HaveOccurred(), "Failed to build the manager image")
 
-	// TODO(user): If you want to change the e2e test vendor from Kind,
-	// ensure the image is built and available, then remove the following block.
-	By("loading the manager image on Kind")
-	err = utils.LoadImageToKindClusterWithName(managerImage)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
+	By("loading the manager image into kind")
+	Expect(utils.LoadImageToKindClusterWithName(managerImage)).To(Succeed())
 
-	setupCertManager()
+	By("deploying the operator")
+	cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage))
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to deploy the operator")
+
+	cmd = exec.Command("kubectl", "-n", "volume-branch-operator-system", "rollout",
+		"status", "deploy/volume-branch-operator-controller-manager", "--timeout=180s")
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "operator never became ready")
 })
 
 var _ = AfterSuite(func() {
-	teardownCertManager()
+	// The kind cluster is deleted by make cleanup-test-e2e; nothing to do.
 })
-
-// setupCertManager installs CertManager if needed for webhook tests.
-// Skips installation if CERT_MANAGER_INSTALL_SKIP=true or if already present.
-func setupCertManager() {
-	if os.Getenv("CERT_MANAGER_INSTALL_SKIP") == "true" {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Skipping CertManager installation (CERT_MANAGER_INSTALL_SKIP=true)\n")
-		return
-	}
-
-	By("checking if CertManager is already installed")
-	if utils.IsCertManagerCRDsInstalled() {
-		_, _ = fmt.Fprintf(GinkgoWriter, "CertManager is already installed. Skipping installation.\n")
-		return
-	}
-
-	// Mark for cleanup before installation to handle interruptions and partial installs.
-	shouldCleanupCertManager = true
-
-	By("installing CertManager")
-	Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install CertManager")
-}
-
-// teardownCertManager uninstalls CertManager if it was installed by setupCertManager.
-// This ensures we only remove what we installed.
-func teardownCertManager() {
-	if !shouldCleanupCertManager {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Skipping CertManager cleanup (not installed by this suite)\n")
-		return
-	}
-
-	By("uninstalling CertManager")
-	utils.UninstallCertManager()
-}
