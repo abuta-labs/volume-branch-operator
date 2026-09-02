@@ -28,8 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
-	"github.com/arbit-tech/volume-branch-operator/internal/verify"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
+	"github.com/abuta-labs/volume-branch-operator/internal/verify"
 )
 
 const condNS = "default"
@@ -144,7 +144,7 @@ var _ = Describe("verify preflight (against envtest)", func() {
 		_, err = verify.Run(ctx, k8sClient, disc, &out)
 		Expect(err).NotTo(HaveOccurred())
 		report := out.String()
-		Expect(report).To(ContainSubstring("ok    volumes.arbit-tech.com/v1alpha1/branchsources"))
+		Expect(report).To(ContainSubstring("ok    volumes.abuta-labs.com/v1alpha1/branchsources"))
 		Expect(report).To(ContainSubstring("ok    snapshot.storage.k8s.io/v1/volumesnapshots"))
 		// envtest runs no snapshot-controller: that is a warning, not a failure.
 		Expect(report).To(ContainSubstring("WARN  no deployment named *snapshot-controller*"))

@@ -29,15 +29,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
-	"github.com/arbit-tech/volume-branch-operator/internal/branch"
-	"github.com/arbit-tech/volume-branch-operator/internal/pool"
-	"github.com/arbit-tech/volume-branch-operator/internal/profile"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
+	"github.com/abuta-labs/volume-branch-operator/internal/branch"
+	"github.com/abuta-labs/volume-branch-operator/internal/pool"
+	"github.com/abuta-labs/volume-branch-operator/internal/profile"
 )
 
 // BranchFinalizer gates Branch deletion on clone teardown: PVC, then
 // VolumeSnapshot, then VolumeSnapshotContent, strictly in that order.
-const BranchFinalizer = "volumes.arbit-tech.com/branch-teardown"
+const BranchFinalizer = "volumes.abuta-labs.com/branch-teardown"
 
 // BranchReconciler reconciles a Branch object.
 type BranchReconciler struct {
@@ -45,10 +45,10 @@ type BranchReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branches,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branches/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branches/finalizers,verbs=update
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchsources,verbs=get;list;watch
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branches,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branches/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branches/finalizers,verbs=update
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branchsources,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots;volumesnapshotcontents,verbs=get;list;watch;create;delete

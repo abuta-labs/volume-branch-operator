@@ -1,6 +1,6 @@
 # volume-branch-operator
 
-[![ci](https://github.com/arbit-tech/volume-branch-operator/actions/workflows/ci.yaml/badge.svg)](https://github.com/arbit-tech/volume-branch-operator/actions/workflows/ci.yaml)
+[![ci](https://github.com/abuta-labs/volume-branch-operator/actions/workflows/ci.yaml/badge.svg)](https://github.com/abuta-labs/volume-branch-operator/actions/workflows/ci.yaml)
 
 A Kubernetes operator for **volume branching**: instant copy-on-write clones
 of stateful volumes, kept warm in pools so a branch is ready in seconds
@@ -28,7 +28,7 @@ over the drivers you already run.
 
 ## Status
 
-**Alpha. The API (`volumes.arbit-tech.com/v1alpha1`) may change without
+**Alpha. The API (`volumes.abuta-labs.com/v1alpha1`) may change without
 notice.**
 
 | Driver | Status |
@@ -55,7 +55,7 @@ source's handle). The engine stops at the Bound PVC: what runs on the volume
 is your business.
 
 ```yaml
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: Branch
 metadata:
   name: alice-dev
@@ -95,7 +95,7 @@ Tagged releases ship a single install manifest (CRDs + operator) as a
 release asset:
 
 ```sh
-kubectl apply -f https://github.com/arbit-tech/volume-branch-operator/releases/latest/download/install.yaml
+kubectl apply -f https://github.com/abuta-labs/volume-branch-operator/releases/latest/download/install.yaml
 ```
 
 ## CRD reference
@@ -181,9 +181,9 @@ bin/manager verify --kubeconfig ~/.kube/config
 
 ```
 CRDs
-  ok    volumes.arbit-tech.com/v1alpha1/branchsources
-  ok    volumes.arbit-tech.com/v1alpha1/branchpools
-  ok    volumes.arbit-tech.com/v1alpha1/branches
+  ok    volumes.abuta-labs.com/v1alpha1/branchsources
+  ok    volumes.abuta-labs.com/v1alpha1/branchpools
+  ok    volumes.abuta-labs.com/v1alpha1/branches
   ok    snapshot.storage.k8s.io/v1/volumesnapshots
   ok    snapshot.storage.k8s.io/v1/volumesnapshotclasses
   ok    snapshot.storage.k8s.io/v1/volumesnapshotcontents

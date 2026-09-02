@@ -45,6 +45,11 @@ docker exec "$NODE" bash -euc "
     # where the container's overlayfs file is invisible — a plain file vdev
     # fails with 'no such pool or dataset'. A loop device is a global block
     # device the kernel can open, so wrap the file in one.
+    # The container's /dev is a static snapshot; the kernel's first FREE
+    # loop number can exceed the nodes present here (other host workloads
+    # hold the low ones). Create the missing node before use.
+    LOOPDEV=\$(losetup -f)
+    [ -e "\$LOOPDEV" ] || mknod "\$LOOPDEV" b 7 "\${LOOPDEV#/dev/loop}"
     LOOP=\$(losetup -f --show /var/${POOL}.img)
     zpool create -f '$POOL' "\$LOOP"
   }

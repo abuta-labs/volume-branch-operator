@@ -41,10 +41,10 @@ import (
 
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
-	"github.com/arbit-tech/volume-branch-operator/internal/controller"
-	"github.com/arbit-tech/volume-branch-operator/internal/pool"
-	"github.com/arbit-tech/volume-branch-operator/internal/verify"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
+	"github.com/abuta-labs/volume-branch-operator/internal/controller"
+	"github.com/abuta-labs/volume-branch-operator/internal/pool"
+	"github.com/abuta-labs/volume-branch-operator/internal/verify"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -216,7 +216,7 @@ func main() {
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "f329150c.arbit-tech.com",
+		LeaderElectionID:       "f329150c.abuta-labs.com",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly

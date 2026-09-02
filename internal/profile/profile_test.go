@@ -23,7 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
 )
 
 const gib = "1Gi"

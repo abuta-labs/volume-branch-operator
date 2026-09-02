@@ -1,4 +1,4 @@
-module github.com/arbit-tech/volume-branch-operator
+module github.com/abuta-labs/volume-branch-operator
 
 go 1.25.0
 

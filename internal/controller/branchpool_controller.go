@@ -31,16 +31,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
-	"github.com/arbit-tech/volume-branch-operator/internal/pool"
-	"github.com/arbit-tech/volume-branch-operator/internal/profile"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
+	"github.com/abuta-labs/volume-branch-operator/internal/pool"
+	"github.com/abuta-labs/volume-branch-operator/internal/profile"
 )
 
 // BranchPoolFinalizer gates pool deletion on ordered teardown of its warm
 // set. Owner references would GC the objects anyway, but in arbitrary order —
 // and snapshot-pins-volume backends need the volume gone before its snapshot
 // objects.
-const BranchPoolFinalizer = "volumes.arbit-tech.com/pool-teardown"
+const BranchPoolFinalizer = "volumes.abuta-labs.com/pool-teardown"
 
 // BranchPoolReconciler keeps targetWarm pre-warmed clones per source and
 // reaps clones that went stale.
@@ -52,11 +52,11 @@ type BranchPoolReconciler struct {
 	ProvisionTimeout time.Duration
 }
 
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchpools,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchpools/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchpools/finalizers,verbs=update
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchsources,verbs=get;list;watch
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branches,verbs=get;list;watch
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branchpools,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branchpools/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branchpools/finalizers,verbs=update
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branchsources,verbs=get;list;watch
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branches,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;delete;update;patch
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;watch;update;patch;delete

@@ -28,7 +28,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/arbit-tech/volume-branch-operator/test/utils"
+	"github.com/abuta-labs/volume-branch-operator/test/utils"
 )
 
 // managerImage is built locally and side-loaded into kind — never pulled.

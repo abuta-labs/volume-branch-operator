@@ -33,7 +33,7 @@ import (
 
 	snapv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
 )
 
 const zfsDriver = "zfs.csi.openebs.io"
@@ -67,7 +67,7 @@ func fakeDisc(groups map[string][]string) *discoveryfake.FakeDiscovery {
 
 func fullDisc() *discoveryfake.FakeDiscovery {
 	return fakeDisc(map[string][]string{
-		"volumes.arbit-tech.com/v1alpha1": {"branchsources", "branchpools", "branches"},
+		"volumes.abuta-labs.com/v1alpha1": {"branchsources", "branchpools", "branches"},
 		"snapshot.storage.k8s.io/v1":      {"volumesnapshots", "volumesnapshotclasses", "volumesnapshotcontents"},
 	})
 }
@@ -131,7 +131,7 @@ func TestVerifyHappyPath(t *testing.T) {
 
 func TestVerifyMissingSnapshotCRDs(t *testing.T) {
 	disc := fakeDisc(map[string][]string{
-		"volumes.arbit-tech.com/v1alpha1": {"branchsources", "branchpools", "branches"},
+		"volumes.abuta-labs.com/v1alpha1": {"branchsources", "branchpools", "branches"},
 	})
 	o, report := run(t, disc, snapController())
 	if o.Failures != 3 {

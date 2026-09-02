@@ -34,15 +34,15 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
-	"github.com/arbit-tech/volume-branch-operator/internal/branch"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
+	"github.com/abuta-labs/volume-branch-operator/internal/branch"
 )
 
 const (
 	LabelSource    = branch.SourceLabel
-	LabelPoolState = "volumes.arbit-tech.com/pool-state"
-	LabelClaimant  = "volumes.arbit-tech.com/claimant"
-	LabelCloneID   = "volumes.arbit-tech.com/clone-id"
+	LabelPoolState = "volumes.abuta-labs.com/pool-state"
+	LabelClaimant  = "volumes.abuta-labs.com/claimant"
+	LabelCloneID   = "volumes.abuta-labs.com/clone-id"
 
 	StateWarm    = "warm"
 	StateClaimed = "claimed"

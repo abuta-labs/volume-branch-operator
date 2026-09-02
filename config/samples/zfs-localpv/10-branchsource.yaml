@@ -1,5 +1,5 @@
 # The immutable base every branch is cloned from. Cluster-scoped.
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: BranchSource
 metadata:
   name: golden-v1

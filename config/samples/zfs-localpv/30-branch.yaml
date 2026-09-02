@@ -1,7 +1,7 @@
 # One branch. Namespaced: the PVC lands in this Branch's namespace under the
 # name you choose (the engine never invents names — point your workload at
 # pvcName and it will find its volume).
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: Branch
 metadata:
   name: alice-dev
