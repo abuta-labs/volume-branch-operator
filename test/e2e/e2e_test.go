@@ -32,7 +32,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/arbit-tech/volume-branch-operator/test/utils"
+	"github.com/abuta-labs/volume-branch-operator/test/utils"
 )
 
 const (
@@ -198,7 +198,7 @@ spec:
 
 	It("takes a BranchSource to Ready", func() {
 		kubectlApply(fmt.Sprintf(`
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: BranchSource
 metadata:
   name: e2e-source
@@ -221,7 +221,7 @@ spec:
 
 	It("branches to a Bound PVC carrying the seed data", func() {
 		kubectlApply(fmt.Sprintf(`
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: Branch
 metadata:
   name: br1
@@ -288,7 +288,7 @@ spec:
 
 	It("reaps a TTL branch", func() {
 		kubectlApply(fmt.Sprintf(`
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: Branch
 metadata:
   name: br-ttl
@@ -312,7 +312,7 @@ spec:
 
 	It("warms a pool and claims from it by PV rebind", func() {
 		kubectlApply(`
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: BranchPool
 metadata:
   name: e2e-pool
@@ -340,13 +340,13 @@ spec:
 		// The warm clone's PV is the proof object: a pool claim must hand the
 		// consumer THIS volume (rebind), not provision a new one.
 		warmPV := strings.TrimSpace(mustKubectl("-n", "branch-pool", "get", "pvc",
-			"-l", "volumes.arbit-tech.com/pool-state=warm",
+			"-l", "volumes.abuta-labs.com/pool-state=warm",
 			"-o", "jsonpath={.items[0].spec.volumeName}"))
 		Expect(warmPV).NotTo(BeEmpty())
 		// Compare as quantities: the PVC request canonicalizes ("2Gi") while
 		// restoreSize is captured in raw bytes ("2147483648").
 		warmReq := resource.MustParse(mustKubectl("-n", "branch-pool", "get", "pvc",
-			"-l", "volumes.arbit-tech.com/pool-state=warm",
+			"-l", "volumes.abuta-labs.com/pool-state=warm",
 			"-o", "jsonpath={.items[0].spec.resources.requests.storage}"))
 		if sizingMode == "actual" {
 			wantWarm := resource.MustParse(restoreSize)
@@ -359,7 +359,7 @@ spec:
 		}
 
 		kubectlApply(fmt.Sprintf(`
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: Branch
 metadata:
   name: br-pool
@@ -418,7 +418,7 @@ spec:
 		mustKubectl("delete", "branchsource", "e2e-source", "--wait=true", "--timeout=180s")
 		// No engine-labeled objects may survive source teardown.
 		out := mustKubectl("get", "volumesnapshotcontent",
-			"-l", "volumes.arbit-tech.com/source", "-o", "name")
+			"-l", "volumes.abuta-labs.com/source", "-o", "name")
 		Expect(strings.TrimSpace(out)).To(BeEmpty(), "leaked VSCs: %s", out)
 	})
 })

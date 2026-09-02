@@ -31,16 +31,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
-	"github.com/arbit-tech/volume-branch-operator/internal/branch"
-	"github.com/arbit-tech/volume-branch-operator/internal/profile"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
+	"github.com/abuta-labs/volume-branch-operator/internal/branch"
+	"github.com/abuta-labs/volume-branch-operator/internal/profile"
 )
 
 // SourceFinalizer gates BranchSource deletion on the cascade: every Branch of
 // the source is deleted first (each tears down its own clone objects via its
 // own finalizer), then any engine-created cluster-scoped
 // VolumeSnapshotContent that outlived its Branch is swept.
-const SourceFinalizer = "volumes.arbit-tech.com/source-teardown"
+const SourceFinalizer = "volumes.abuta-labs.com/source-teardown"
 
 // BranchSourceReconciler reconciles a BranchSource object.
 type BranchSourceReconciler struct {
@@ -48,10 +48,10 @@ type BranchSourceReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchsources,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchsources/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branchsources/finalizers,verbs=update
-// +kubebuilder:rbac:groups=volumes.arbit-tech.com,resources=branches,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branchsources,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branchsources/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branchsources/finalizers,verbs=update
+// +kubebuilder:rbac:groups=volumes.abuta-labs.com,resources=branches,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshotcontents,verbs=get;list;watch;create;delete

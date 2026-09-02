@@ -27,14 +27,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
 )
 
 // Labels stamped on engine-created objects, so a BranchSource delete can
 // sweep any cluster-scoped leftovers that outlived their Branch.
 const (
-	SourceLabel = "volumes.arbit-tech.com/source"
-	BranchLabel = "volumes.arbit-tech.com/branch"
+	SourceLabel = "volumes.abuta-labs.com/source"
+	BranchLabel = "volumes.abuta-labs.com/branch"
 )
 
 // VSCName is the per-branch VolumeSnapshotContent name. UID-keyed: the

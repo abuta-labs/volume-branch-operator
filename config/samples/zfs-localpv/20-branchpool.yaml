@@ -2,7 +2,7 @@
 # (seconds) instead of a CreateVolume call. On instant-clone backends like
 # local ZFS a pool is a nicety; on slow-clone backends it is the difference
 # between seconds and minutes.
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: BranchPool
 metadata:
   name: golden-v1-pool

@@ -2,9 +2,9 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
-- bases/volumes.arbit-tech.com_branchsources.yaml
-- bases/volumes.arbit-tech.com_branchpools.yaml
-- bases/volumes.arbit-tech.com_branches.yaml
+- bases/volumes.abuta-labs.com_branchsources.yaml
+- bases/volumes.abuta-labs.com_branchpools.yaml
+- bases/volumes.abuta-labs.com_branches.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

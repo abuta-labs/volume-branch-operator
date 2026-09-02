@@ -26,7 +26,7 @@ package profile
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
 )
 
 // Profile is the resolved, effective policy for one BranchSource.

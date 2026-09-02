@@ -29,9 +29,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	volumesv1alpha1 "github.com/arbit-tech/volume-branch-operator/api/v1alpha1"
-	"github.com/arbit-tech/volume-branch-operator/internal/branch"
-	"github.com/arbit-tech/volume-branch-operator/internal/pool"
+	volumesv1alpha1 "github.com/abuta-labs/volume-branch-operator/api/v1alpha1"
+	"github.com/abuta-labs/volume-branch-operator/internal/branch"
+	"github.com/abuta-labs/volume-branch-operator/internal/pool"
 )
 
 // finishPVCDeletion simulates the pvc-protection controller: envtest's

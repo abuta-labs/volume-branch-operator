@@ -1,6 +1,6 @@
 # Minimal BranchSource. See config/samples/zfs-localpv/ for a complete,
 # commented walk-through on a proven driver.
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: BranchSource
 metadata:
   name: branchsource-sample

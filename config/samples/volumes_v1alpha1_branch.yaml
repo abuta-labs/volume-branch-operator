@@ -1,6 +1,6 @@
 # Minimal Branch: produces a Bound PVC named "my-branch-data" in this
 # namespace, claimed from the pool when it has stock.
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: Branch
 metadata:
   name: branch-sample

@@ -1,7 +1,7 @@
 # This rule is not used by the project volume-branch-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants read-only access to volumes.arbit-tech.com resources.
+# Grants read-only access to volumes.abuta-labs.com resources.
 # This role is intended for users who need visibility into these resources
 # without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
 
@@ -14,7 +14,7 @@ metadata:
   name: branch-viewer-role
 rules:
 - apiGroups:
-  - volumes.arbit-tech.com
+  - volumes.abuta-labs.com
   resources:
   - branches
   verbs:
@@ -22,7 +22,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - volumes.arbit-tech.com
+  - volumes.abuta-labs.com
   resources:
   - branches/status
   verbs:

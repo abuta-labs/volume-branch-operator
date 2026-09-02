@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: branchpools.volumes.arbit-tech.com
+  name: branchpools.volumes.abuta-labs.com
 spec:
-  group: volumes.arbit-tech.com
+  group: volumes.abuta-labs.com
   names:
     kind: BranchPool
     listKind: BranchPoolList

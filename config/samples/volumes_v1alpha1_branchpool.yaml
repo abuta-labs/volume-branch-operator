@@ -1,5 +1,5 @@
 # Minimal BranchPool: keeps 2 pre-warmed clones of the sample source.
-apiVersion: volumes.arbit-tech.com/v1alpha1
+apiVersion: volumes.abuta-labs.com/v1alpha1
 kind: BranchPool
 metadata:
   name: branchpool-sample

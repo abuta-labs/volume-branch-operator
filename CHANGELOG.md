@@ -1,9 +1,26 @@
 # Changelog
 
+## v0.1.0-alpha.3
+
+**BREAKING — reinstall required.** The project moved to the renamed GitHub
+account `abuta-labs`, and with it everything derived from the old account
+name:
+
+- **API group renamed** to `volumes.abuta-labs.com/v1alpha1` (CRD kinds,
+  finalizers, and label keys all move with it). There is **no conversion**
+  from the previous group: uninstall any v0.1.0-alpha.2 deployment (delete
+  its Branches/BranchPools/BranchSources first so finalizer teardown runs,
+  then remove the old CRDs) and install fresh.
+- Go module path is now `github.com/abuta-labs/volume-branch-operator`.
+- Operator images publish to `ghcr.io/abuta-labs/volume-branch-operator`.
+
+No functional changes.
+
 ## v0.1.0-alpha.1
 
-First tagged release. Alpha: the `volumes.arbit-tech.com/v1alpha1` API may
-change without notice.
+First tagged release. Alpha: the `volumes.arbit-tech.com/v1alpha1` API — as
+this release shipped it, before the v0.1.0-alpha.3 rename — may change
+without notice.
 
 ### Engine
 
