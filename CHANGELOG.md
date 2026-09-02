@@ -18,8 +18,9 @@ No functional changes.
 
 ## v0.1.0-alpha.1
 
-First tagged release. Alpha: the `volumes.abuta-labs.com/v1alpha1` API may
-change without notice.
+First tagged release. Alpha: the `volumes.arbit-tech.com/v1alpha1` API — as
+this release shipped it, before the v0.1.0-alpha.3 rename — may change
+without notice.
 
 ### Engine
 
